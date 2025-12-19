@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { handleToolCall } from '../../src/registry.js';
-import { getTextContent } from '../helpers.js';
+import { getTextContent, parseToolResponse } from '../helpers.js';
 
 describe('HP Delta Notation', () => {
   let testCharacterId: string;
@@ -29,9 +29,8 @@ describe('HP Delta Notation', () => {
       speed: 30,
     });
 
-    const text = getTextContent(result);
-    const match = text.match(/Character ID: ([a-z0-9-]+)/);
-    testCharacterId = match![1];
+    const response = parseToolResponse(result);
+    testCharacterId = response.data.character.id;
   });
 
   describe('String Delta Notation (Single Mode)', () => {
@@ -40,9 +39,8 @@ describe('HP Delta Notation', () => {
       const getResult = await handleToolCall('get_character', {
         characterId: testCharacterId,
       });
-      const initialText = getTextContent(getResult);
-      const hpMatch = initialText.match(/HP: \[.*?\] (\d+)\/(\d+)/);
-      const initialHp = parseInt(hpMatch![1]);
+      const initialResponse = parseToolResponse(getResult);
+      const initialHp = initialResponse.data.character.hp.current;
 
       // Apply damage using string delta
       const result = await handleToolCall('update_character', {
@@ -51,9 +49,9 @@ describe('HP Delta Notation', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
-      expect(text).toContain('HP:');
-      expect(text).toContain((initialHp - 12).toString());
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('HP:');
+      expect(response.display).toContain((initialHp - 12).toString());
     });
 
     it('should apply healing with positive string delta "+8"', async () => {
@@ -67,9 +65,8 @@ describe('HP Delta Notation', () => {
       const getResult = await handleToolCall('get_character', {
         characterId: testCharacterId,
       });
-      const currentText = getTextContent(getResult);
-      const hpMatch = currentText.match(/HP: \[.*?\] (\d+)\/(\d+)/);
-      const currentHp = parseInt(hpMatch![1]);
+      const currentResponse = parseToolResponse(getResult);
+      const currentHp = currentResponse.data.character.hp.current;
 
       // Apply healing using string delta
       const result = await handleToolCall('update_character', {
@@ -78,9 +75,9 @@ describe('HP Delta Notation', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
-      expect(text).toContain('HP:');
-      expect(text).toContain((currentHp + 8).toString());
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('HP:');
+      expect(response.display).toContain((currentHp + 8).toString());
     });
 
     it('should cap healing at maxHp', async () => {
@@ -97,11 +94,10 @@ describe('HP Delta Notation', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
-      // Should be capped at maxHp - match the "after" value (after the arrow →)
-      const hpMatch = text.match(/HP:.*?→.*?(\d+)\/(\d+)/);
-      const finalHp = parseInt(hpMatch![1]);
-      const maxHp = parseInt(hpMatch![2]);
+      const response = parseToolResponse(result);
+      // Should be capped at maxHp
+      const finalHp = response.data.character.hp.current;
+      const maxHp = response.data.character.hp.max;
       expect(finalHp).toBe(maxHp);
     });
 
@@ -113,10 +109,10 @@ describe('HP Delta Notation', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // HP should be 0, not negative
-      expect(text).toContain('HP:');
-      expect(text).toContain('0/');
+      expect(response.display).toContain('HP:');
+      expect(response.display).toContain('0/');
     });
   });
 
@@ -141,9 +137,8 @@ describe('HP Delta Notation', () => {
         speed: 30,
       });
 
-      const text = getTextContent(result);
-      const match = text.match(/Character ID: ([a-z0-9-]+)/);
-      secondCharId = match![1];
+      const response = parseToolResponse(result);
+      secondCharId = response.data.character.id;
     });
 
     it('should apply damage to multiple characters with string deltas', async () => {
@@ -155,10 +150,10 @@ describe('HP Delta Notation', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
-      expect(text).toContain('BATCH CHARACTER UPDATE');
-      expect(text).toContain('Delta Test Hero');
-      expect(text).toContain('Batch Test Hero');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('## 📋 Batch Update');
+      expect(response.display).toContain('Delta Test Hero');
+      expect(response.display).toContain('Batch Test Hero');
     });
 
     it('should apply healing to multiple characters with string deltas', async () => {
@@ -179,8 +174,8 @@ describe('HP Delta Notation', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
-      expect(text).toContain('BATCH CHARACTER UPDATE');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('## 📋 Batch Update');
     });
   });
 
@@ -190,9 +185,8 @@ describe('HP Delta Notation', () => {
       const getResult = await handleToolCall('get_character', {
         characterId: testCharacterId,
       });
-      const initialText = getTextContent(getResult);
-      const hpMatch = initialText.match(/HP: \[.*?\] (\d+)\/(\d+)/);
-      const initialHp = parseInt(hpMatch![1]);
+      const initialResponse = parseToolResponse(getResult);
+      const initialHp = initialResponse.data.character.hp.current;
 
       // Apply damage using numeric delta
       const result = await handleToolCall('update_character', {
@@ -201,10 +195,9 @@ describe('HP Delta Notation', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
-      expect(text).toContain('HP:');
-      const afterMatch = text.match(/HP:.*?→.*?(\d+)\/(\d+)/);
-      expect(parseInt(afterMatch![1])).toBe(initialHp - 12);
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('**HP:**');
+      expect(response.data.character.hp.current).toBe(initialHp - 12);
     });
 
     it('should apply multiple numeric deltas in sequence', async () => {
@@ -212,9 +205,8 @@ describe('HP Delta Notation', () => {
       const getResult = await handleToolCall('get_character', {
         characterId: testCharacterId,
       });
-      const initialText = getTextContent(getResult);
-      const hpMatch = initialText.match(/HP: \[.*?\] (\d+)\/(\d+)/);
-      const initialHp = parseInt(hpMatch![1]);
+      const initialResponse = parseToolResponse(getResult);
+      const initialHp = initialResponse.data.character.hp.current;
 
       // Take damage
       await handleToolCall('update_character', {
@@ -226,9 +218,8 @@ describe('HP Delta Notation', () => {
       const midResult = await handleToolCall('get_character', {
         characterId: testCharacterId,
       });
-      const midText = getTextContent(midResult);
-      const midMatch = midText.match(/HP: \[.*?\] (\d+)\/(\d+)/);
-      expect(parseInt(midMatch![1])).toBe(initialHp - 15);
+      const midResponse = parseToolResponse(midResult);
+      expect(midResponse.data.character.hp.current).toBe(initialHp - 15);
 
       // Take more damage
       const finalResult = await handleToolCall('update_character', {
@@ -237,9 +228,8 @@ describe('HP Delta Notation', () => {
       });
 
       expect(finalResult.isError).toBeUndefined();
-      const finalText = getTextContent(finalResult);
-      const finalMatch = finalText.match(/HP:.*?→.*?(\d+)\/(\d+)/);
-      expect(parseInt(finalMatch![1])).toBe(initialHp - 15 - 8);
+      const finalResponse = parseToolResponse(finalResult);
+      expect(finalResponse.data.character.hp.current).toBe(initialHp - 15 - 8);
     });
 
     it('should not allow HP to go below 0 with numeric deltas', async () => {
@@ -250,9 +240,8 @@ describe('HP Delta Notation', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
-      const hpMatch = text.match(/HP:.*?→.*?(\d+)\/(\d+)/);
-      expect(parseInt(hpMatch![1])).toBe(0); // Should be clamped at 0
+      const response = parseToolResponse(result);
+      expect(response.data.character.hp.current).toBe(0); // Should be clamped at 0
     });
   });
 
@@ -277,9 +266,8 @@ describe('HP Delta Notation', () => {
         speed: 30,
       });
 
-      const text = getTextContent(result);
-      const match = text.match(/Character ID: ([a-z0-9-]+)/);
-      secondCharId = match![1];
+      const response = parseToolResponse(result);
+      secondCharId = response.data.character.id;
     });
 
     it('should apply numeric damage to multiple characters in batch', async () => {
@@ -291,10 +279,10 @@ describe('HP Delta Notation', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
-      expect(text).toContain('BATCH CHARACTER UPDATE');
-      expect(text).toContain('Delta Test Hero');
-      expect(text).toContain('Numeric Batch Hero');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('## 📋 Batch Update');
+      expect(response.display).toContain('Delta Test Hero');
+      expect(response.display).toContain('Numeric Batch Hero');
     });
   });
 
@@ -306,9 +294,9 @@ describe('HP Delta Notation', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
-      expect(text).toContain('HP:');
-      expect(text).toContain('25');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('HP:');
+      expect(response.display).toContain('25');
     });
 
     it('should reject absolute HP exceeding maxHp', async () => {

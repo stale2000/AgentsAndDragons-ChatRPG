@@ -31,10 +31,10 @@ export interface ToolDefinition {
   handler: (args: unknown) => Promise<CallToolResult>;
 }
 
-// Helper: Format success response
-export function success(markdown: string): CallToolResult {
+// Helper: Format success response (can accept either Markdown or JSON)
+export function success(content: string): CallToolResult {
   return {
-    content: [{ type: 'text', text: markdown }],
+    content: [{ type: 'text', text: content }],
   };
 }
 
@@ -79,7 +79,7 @@ function trackToolCall(name: string): void {
 // TOOL REGISTRY (Static)
 // ============================================================
 
-import { parseDice, formatDiceResult } from './modules/dice.js';
+import { parseDice } from './modules/dice.js';
 import {
   createCharacter,
   createCharacterSchema,
@@ -93,7 +93,162 @@ import {
 import { measureDistance, measureDistanceSchema } from './modules/spatial.js';
 import { manageCondition, manageConditionSchema, createEncounter, createEncounterSchema, executeAction, executeActionSchema } from './modules/combat.js';
 import { createBox, BOX } from './modules/ascii-art.js';
+import { ToolResponse, toResponse } from './modules/markdown-format.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+
+// ============================================================
+// DICE FORMATTING HELPERS
+// ============================================================
+
+/**
+ * Format a single dice roll result as a ToolResponse with Semantic Markdown
+ */
+function formatSingleDiceRoll(
+  result: { expression: string; rolls: number[]; kept: number[]; modifier: number; total: number },
+  reason?: string
+): string {
+  const { expression, rolls, kept, modifier, total } = result;
+
+  // Detect critical hits/misses on d20
+  const isCriticalHit =
+    expression.toLowerCase().includes('d20') &&
+    rolls.length === 1 &&
+    rolls[0] === 20;
+  const isCriticalMiss =
+    expression.toLowerCase().includes('d20') &&
+    rolls.length === 1 &&
+    rolls[0] === 1;
+
+  let display = '';
+
+  if (isCriticalHit) {
+    display = `## 💥 CRITICAL HIT!\n\n**d20:** [${rolls[0]}]`;
+    if (modifier !== 0) {
+      const sign = modifier > 0 ? '+' : '';
+      display += ` ${sign}${modifier}`;
+    }
+    display += ` = **${total}**`;
+  } else if (isCriticalMiss) {
+    display = `## 💀 Critical Miss\n\n**d20:** [${rolls[0]}]`;
+    if (modifier !== 0) {
+      const sign = modifier > 0 ? '+' : '';
+      display += ` ${sign}${modifier}`;
+    }
+    display += ` = **${total}**`;
+  } else {
+    // Normal roll
+    display = `## 🎲 ${expression}\n\n`;
+
+    // Show dice results
+    const rollDisplay = rolls.map((r) => `[${r}]`).join(' ');
+    display += `**Dice:** ${rollDisplay}`;
+
+    // Show kept if different from rolled
+    if (rolls.length !== kept.length) {
+      const keptDisplay = kept.map((r) => `[${r}]`).join(' ');
+      display += `\n**Kept:** ${keptDisplay}`;
+    }
+
+    // Show modifier if present
+    if (modifier !== 0) {
+      const sign = modifier > 0 ? '+' : '';
+      display += `\n**Modifier:** ${sign}${modifier}`;
+    }
+
+    // Show total
+    display += `\n**Total:** **${total}**`;
+  }
+
+  // Add reason if provided
+  if (reason) {
+    display += `\n\n*${reason}*`;
+  }
+
+  return display;
+}
+
+/**
+ * Convert a single roll to a ToolResponse JSON
+ */
+function singleRollToResponse(
+  result: { expression: string; rolls: number[]; kept: number[]; modifier: number; total: number },
+  reason?: string
+): string {
+  const { expression, rolls, kept, modifier, total } = result;
+
+  const isCriticalHit =
+    expression.toLowerCase().includes('d20') &&
+    rolls.length === 1 &&
+    rolls[0] === 20;
+  const isCriticalMiss =
+    expression.toLowerCase().includes('d20') &&
+    rolls.length === 1 &&
+    rolls[0] === 1;
+
+  const response: ToolResponse = {
+    display: formatSingleDiceRoll(result, reason),
+    data: {
+      success: true,
+      type: 'roll',
+      expression,
+      rolls,
+      kept,
+      modifier,
+      total,
+      isCritical: isCriticalHit,
+      isCriticalMiss,
+    },
+    suggestions: ['Roll damage', 'Make another attack'],
+  };
+
+  return toResponse(response);
+}
+
+/**
+ * Convert batch rolls to a ToolResponse JSON
+ */
+function batchRollsToResponse(
+  results: Array<{ label?: string; expression: string; total: number; rolls: number[]; kept: number[] }>,
+  reason?: string
+): string {
+  // Build Markdown table
+  let tableMarkdown = '## 🎲 Batch Roll\n\n| Label | Roll | Result |\n|-------|------|:------:|\n';
+
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const label = r.label || `Roll ${i + 1}`;
+    const rollDisplay = r.rolls.map((roll) => `[${roll}]`).join(' ');
+
+    // Build roll expression display
+    let rollExpr = rollDisplay;
+    if (r.rolls.length !== r.kept.length) {
+      const keptDisplay = r.kept.map((roll) => `[${roll}]`).join(' ');
+      rollExpr = `${keptDisplay} (from ${rollDisplay})`;
+    }
+
+    tableMarkdown += `| ${label} | ${rollExpr} | **${r.total}** |\n`;
+  }
+
+  const grandTotal = results.reduce((sum, r) => sum + r.total, 0);
+  tableMarkdown += `\n**Grand Total:** ${grandTotal}`;
+
+  if (reason) {
+    tableMarkdown += `\n\n*${reason}*`;
+  }
+
+  const response: ToolResponse = {
+    display: tableMarkdown,
+    data: {
+      success: true,
+      type: 'batch_roll',
+      results,
+      grandTotal,
+    },
+    suggestions: ['Roll again', 'Continue combat'],
+  };
+
+  return toResponse(response);
+}
 
 // Helper to convert Zod schema to JSON Schema without $ref (Claude MCP client doesn't resolve refs)
 // MCP requires type: "object" at root, so we flatten union schemas
@@ -231,42 +386,8 @@ export const toolRegistry: Record<string, ToolDefinition> = {
             });
           }
 
-          // Format batch output
-          const content: string[] = [];
-
-          if (reason) {
-            content.push(reason.toUpperCase());
-            content.push('');
-          }
-
-          content.push(`ROLLING ${results.length} DICE ${results.length === 1 ? 'EXPRESSION' : 'EXPRESSIONS'}`);
-          content.push('');
-          content.push('─'.repeat(40));
-          content.push('');
-
-          for (let i = 0; i < results.length; i++) {
-            const r = results[i];
-            const label = r.label || `Roll ${i + 1}`;
-
-            content.push(`${label}:`);
-            content.push(`  Expression: ${r.expression}`);
-
-            if (r.rolls.length !== r.kept.length) {
-              content.push(`  Rolled: [${r.rolls.join(', ')}]`);
-              content.push(`  Kept: [${r.kept.join(', ')}]`);
-            } else if (r.rolls.length > 1) {
-              content.push(`  Rolled: [${r.rolls.join(', ')}]`);
-            }
-
-            content.push(`  Result: ${r.total}`);
-            content.push('');
-          }
-
-          content.push('─'.repeat(40));
-          content.push('');
-          content.push(`TOTAL ACROSS ALL ROLLS: ${results.reduce((sum, r) => sum + r.total, 0)}`);
-
-          return success(createBox('BATCH ROLL', content, undefined, 'HEAVY'));
+          // Format batch output as ToolResponse JSON
+          return success(batchRollsToResponse(results, reason));
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           return error(message);
@@ -301,7 +422,7 @@ export const toolRegistry: Record<string, ToolDefinition> = {
         }
 
         const result = parseDice(finalExpression);
-        return success(formatDiceResult(result, reason));
+        return success(singleRollToResponse(result, reason));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return error(message);

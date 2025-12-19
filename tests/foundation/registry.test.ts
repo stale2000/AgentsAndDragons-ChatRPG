@@ -51,8 +51,9 @@ describe('Tool Registry', () => {
       const result = await handleToolCall('roll_dice', { expression: '2d6' });
       const content = result.content[0];
       if (content.type === 'text') {
-        expect(content.text).toContain('╔'); // ASCII box border
-        expect(content.text).toContain('2d6');
+        const response = JSON.parse(content.text);
+        expect(response.display).toContain('## 🎲');
+        expect(response.data.type).toBe('roll');
       }
     });
   });

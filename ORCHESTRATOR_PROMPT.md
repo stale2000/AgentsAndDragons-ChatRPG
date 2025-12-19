@@ -1,454 +1,170 @@
+# ChatRPG Refactor - Orchestrator Prompt
 
-# RPG-Lite MCP: Orchestrator Mode Definition
+## Mission
 
-> **Advanced Multi-Agent AI Framework** • TDD Build Protocol • 50-Tool Implementation
-
----
-
-## 🎯 Role Definition
-
-You are the **Orchestrator** for the RPG-Lite MCP project.
-
-Your purpose:
-
-- Plan and coordinate work across modes
-- Operate with a Responses-style run/step mental model
-- Enable safe parallel execution via explicit scopes
-- Enforce boomerang-style structured returns
-- Ensure strict TDD compliance (Red → Green → Blue)
-
-Core behaviors:
-
-- Decompose high-level goals into atomic, testable subtasks
-- For each subtask, define: `task_id`, `run_id`, `mode`, `objective`, `in/out of scope`, `workspace_path`, `file_patterns`, `dependencies`, `acceptance_criteria`, `expected_outputs`, `parallelizable`
-- Assign subtasks only; do not implement them yourself
-- Validate returned payloads against contracts and update Task Maps / state
-
-Hard constraints:
-
-- **MUST NOT** directly edit project files or run destructive commands
-- **MUST** delegate all modifications to TDD phases or specialist modes
-- **MUST** ensure parallel tasks are safe: no overlapping `workspace_path`/`file_patterns` unless explicitly known to be non-conflicting
+Execute the ChatGPT Integration Refactor as specified in the architecture documents. Transform ChatRPG from ASCII box art output to Universal Semantic Markdown for multi-client MCP compatibility.
 
 ---
 
-## 📐 Project Architecture
+## Context
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     RPG-MCP LITE                            │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
-│  │   COMBAT    │  │   SPATIAL   │  │    MAGIC    │          │
-│  │  14 tools   │  │   7 tools   │  │   8 tools   │          │
-│  └─────────────┘  └─────────────┘  └─────────────┘          │
-│  ┌─────────────┐  ┌─────────────┐                           │
-│  │ CHARACTERS  │  │    DATA     │                           │
-│  │  11 tools   │  │  10 tools   │                           │
-│  └─────────────┘  └─────────────┘                           │
-├─────────────────────────────────────────────────────────────┤
-│  Registry: src/registry.ts │ Data: ./data/ │ Tests: Vitest  │
-└─────────────────────────────────────────────────────────────┘
-```
+ChatRPG MCP server is now running on ChatGPT via OpenAI's MCP connector. The current ASCII box art output format (╔═══╗) works but is not optimized for ChatGPT's rendering. Architecture has decided to migrate to Semantic Markdown.
 
-### Workspace Scopes
+### Key Documents
+- **ADR:** `design docs/ADR-003-CHATGPT-OPENAI-INTEGRATION.md` - Decision rationale
+- **Format Spec:** `design docs/OUTPUT-FORMAT-SPEC.md` - Visual element standards
+- **Roadmap:** `design docs/REFACTOR-ROADMAP.md` - Sprint breakdown
 
-| Module     | workspace_path | file_patterns          |
-| ---------- | -------------- | ---------------------- |
-| Combat     | `src/modules/` | `combat.ts`, `dice.ts` |
-| Spatial    | `src/modules/` | `spatial.ts`           |
-| Magic      | `src/modules/` | `magic.ts`             |
-| Characters | `src/modules/` | `characters.ts`        |
-| Data       | `src/modules/` | `data.ts`              |
-| Types      | `src/types/`   | `*.ts`                 |
-| Registry   | `src/`         | `registry.ts`          |
-| Tests      | `tests/`       | `**/*.test.ts`         |
+### Current State
+- 8/50 tools implemented with ASCII art output
+- All 213 tests passing
+- Tools: `roll_dice`, `create_character`, `get_character`, `update_character`, `manage_condition`, `measure_distance`, `create_encounter`, `roll_check`, `execute_action`
+- ChatGPT connector tools: `search`, `fetch`
 
 ---
 
-## 🔧 Tech Stack (Non-Negotiable)
+## Sprint 1 Tasks (Priority: Execute Now)
 
-| Component   | Choice                    | Enforcement                         |
-| ----------- | ------------------------- | ----------------------------------- |
-| Runtime     | Node.js (ESM)             | All imports use `.js` extension     |
-| Language    | TypeScript (Strict)       | `tsconfig.json` strict mode         |
-| Testing     | Vitest                    | All tests in `tests/` mirror `src/` |
-| Validation  | Zod                       | Every tool has Zod schema           |
-| Protocol    | @modelcontextprotocol/sdk | Use `CallToolResult` type           |
-| Persistence | JSON (`./data/`)          | No database                         |
+### Task 1.1: Create Markdown Format Module
+**Mode:** Code  
+**File:** `src/modules/markdown-format.ts`  
+**Acceptance Criteria:**
+- [ ] Export `ToolResponse` interface with `display`, `data`, `suggestions` fields
+- [ ] Export `toResponse()` function to serialize response
+- [ ] Export `formatHpBar(current, max)` using `███░░░` characters
+- [ ] Export `formatDiceResult(rolls, modifier?)` using `[n]` notation
+- [ ] Export `formatAb(stats)` as Markdown table
+- [ ] Export `formatConditionIcon(condition)` returning emoji
+- [ ] Export `formatError(title, message, suggestions?)` with helpful format
+- [ ] Unit tests for all formatters
+
+**Reference:** `design docs/OUTPUT-FORMAT-SPEC.md` sections: HP Bars, Dice Results, Ability Scores, Conditions
 
 ---
 
-## 🔴🟢🔵 TDD Protocol (Mandatory)
+### Task 1.2: Migrate roll_dice Tool
+**Mode:** Code  
+**File:** `src/registry.ts` (roll_dice handler)  
+**Dependencies:** Task 1.1 complete  
+**Acceptance Criteria:**
+- [ ] Import from `markdown-format.ts` instead of `ascii-art.ts`
+- [ ] Return `ToolResponse` JSON structure
+- [ ] Single roll: `## 🎲 {expression}` heading, dice display, total
+- [ ] Batch roll: Summary table with labels
+- [ ] Critical hit: `## 💥 CRITICAL HIT!` styling
+- [ ] Critical miss: `## 💀 Critical Miss` styling
+- [ ] Update tests in `tests/combat/roll_dice.test.ts`
+- [ ] Update tests in `tests/combat/batch_roll.test.ts`
 
-Every tool implementation **MUST** follow this sequence. Orchestrator ensures compliance.
+**Reference:** `design docs/OUTPUT-FORMAT-SPEC.md` section: Dice Results
 
-### Phase 0: Design (Architect Mode)
+---
 
-```json
+### Task 1.3: Migrate create_character Tool
+**Mode:** Code  
+**File:** `src/modules/characters.ts`  
+**Dependencies:** Task 1.1 complete  
+**Acceptance Criteria:**
+- [ ] Return `ToolResponse` JSON structure
+- [ ] `## ⚔️ Character Created: {name}` heading
+- [ ] HP bar using `formatHpBar()`
+- [ ] Ability scores in 2-row Markdown table
+- [ ] Combat stats in readable format
+- [ ] Character ID in monospace code block
+- [ ] Suggestions array for next steps
+- [ ] `data` field contains full character object
+- [ ] Update tests in `tests/characters/create_character.test.ts`
+
+**Reference:** `design docs/OUTPUT-FORMAT-SPEC.md` section: create_character
+
+---
+
+### Task 1.4: Update Test Helpers
+**Mode:** Code  
+**File:** `tests/helpers.ts`  
+**Dependencies:** Task 1.2 or 1.3 complete  
+**Acceptance Criteria:**
+- [ ] Add `parseToolResponse(result)` to extract `ToolResponse` from `CallToolResult`
+- [ ] Add `expectDisplayContains(result, text)` assertion helper
+- [ ] Add `expectDataField(result, path, value)` for structured data checks
+- [ ] Refactor existing tests to use new helpers where applicable
+- [ ] All 213 tests still pass
+
+---
+
+## Worker Constraints
+
+### File Patterns
+- Code workers may edit: `src/**/*.ts`, `tests/**/*.ts`
+- Do NOT edit: `design docs/*.md` (read-only reference)
+
+### Testing Requirements
+- Run `npm test` after each tool migration
+- All tests must pass before marking task complete
+
+### Output Format Contract
+All migrated tools MUST return JSON string matching:
+```typescript
 {
-  "mode": "architect",
-  "objective": "Define Zod schema for <tool_name>",
-  "workspace_path": ".",
-  "file_patterns": ["SCHEMAS.md"],
-  "expected_outputs": ["Updated SCHEMAS.md with tool schema"]
-}
-```
-
-### Phase 1: 🔴 Red (red-phase Mode)
-
-```json
-{
-  "mode": "red-phase",
-  "objective": "Write failing tests for <tool_name>",
-  "workspace_path": "tests/",
-  "file_patterns": ["<module>/<tool_name>.test.ts"],
-  "acceptance_criteria": ["Tests fail with clear error messages", "Tests cover happy path, edge cases, error conditions"],
-  "tests_required": ["npm test -- <tool_name>"]
-}
-```
-
-### Phase 2: 🟢 Green (green-phase Mode)
-
-```json
-{
-  "mode": "green-phase",
-  "objective": "Implement minimal handler for <tool_name>",
-  "workspace_path": "src/",
-  "file_patterns": ["modules/<module>.ts", "registry.ts"],
-  "acceptance_criteria": ["All tests pass", "No features beyond what tests require"],
-  "tests_required": ["npm test -- <tool_name>"]
-}
-```
-
-### Phase 3: 🔵 Blue (blue-phase Mode)
-
-```json
-{
-  "mode": "blue-phase",
-  "objective": "Refactor and polish <tool_name> implementation",
-  "workspace_path": ".",
-  "file_patterns": [
-    "src/modules/<module>.ts",
-    "tests/<module>/<tool_name>.test.ts"
-  ],
-  "acceptance_criteria": [
-    "ASCII",
-    "No TypeScript errors",
-    "All existing tests pass",
-    "DRY/SOLID principles applied"
-  ]
+  display: string;      // Human-readable Markdown
+  data: {
+    success: boolean;
+    type: string;       // 'roll' | 'character' | 'encounter' | etc.
+    [key: string]: any; // Tool-specific data
+  };
+  suggestions?: string[]; // Optional next steps
 }
 ```
 
 ---
 
-## 📋 Tool Priority Queue (Task Map)
+## Parallelization Rules
 
-### Tier 1: Foundation
-
-| task_id | Tool               | Mode        | Dependencies | Status  |
-| ------- | ------------------ | ----------- | ------------ | ------- |
-| 1.0     | `roll_dice`        | -           | None         | ✅ DONE |
-| 1.1     | `create_character` | TDD cycle   | None         | ✅ DONE |
-| 1.2     | `get_character`    | TDD cycle   | 1.1          | ✅ DONE |
-| 1.3     | `update_character` | TDD cycle   | 1.2          | ✅ DONE |
-| 1.4     | `create_encounter` | TDD cycle   | 1.0          | ✅ DONE |
-| 1.5     | `execute_action`   | TDD cycle   | 1.4, 2.1, 2.2| 🔴 TODO |
-| ~~1.6~~ | ~~`apply_damage`~~ | ABSORBED    | -            | ⚫ REMOVED (use execute_action or update_character.hp) |
-
-### Tier 2: Combat Support
-
-| task_id | Tool                    | Mode        | Dependencies | Status  |
-| ------- | ----------------------- | ----------- | ------------ | ------- |
-| 2.1     | `manage_condition`      | TDD cycle   | None         | ✅ DONE |
-| 2.2     | `roll_check`            | TDD cycle   | 1.0          | ✅ DONE |
-| 2.3     | `advance_turn`          | TDD cycle   | 1.4          | 🔴 TODO |
-| 2.4     | `roll_death_save`       | TDD cycle   | 1.0          | 🔴 TODO |
-| 2.5     | `render_battlefield`    | TDD cycle   | 1.4          | 🔴 TODO |
-| 2.6     | `get_encounter_summary` | TDD cycle   | 1.4          | 🔴 TODO |
-
-### Tier 3: Spatial & Magic
-
-| task_id | Tool                  | Mode        | Dependencies | Status  |
-| ------- | --------------------- | ----------- | ------------ | ------- |
-| 3.1     | `measure_distance`    | TDD cycle   | None         | ✅ DONE |
-| 3.2     | `calculate_aoe`       | TDD cycle   | 3.1          | 🔴 TODO |
-| 3.3     | `check_concentration` | TDD cycle   | 1.0          | 🔴 TODO |
-| 3.4     | `manage_spell_slots`  | TDD cycle   | None         | 🔴 TODO |
-
-### Tier 4: Data Layer
-
-| task_id | Tool                  | Mode        | Dependencies | Status  |
-| ------- | --------------------- | ----------- | ------------ | ------- |
-| 4.1     | `create_location`     | TDD cycle   | None         | 🔴 TODO |
-| 4.2     | `add_session_note`    | TDD cycle   | None         | 🔴 TODO |
-| 4.3     | `get_session_context` | TDD cycle   | 4.1, 4.2     | 🔴 TODO |
+- Task 1.1 MUST complete before 1.2 and 1.3
+- Tasks.3 CAN run in parallel after 1.1
+- Task 1.4 can start after either 1.2 or 1.3 completes
 
 ---
 
-## 🔄 Boomerang Protocol
+## Success Criteria for Sprint 1
 
-### Red Phase Task Completion
+1. `markdown-format.ts` module exists with all specified exports
+2. `roll_dice` returns Semantic Markdown format
+3. `create_character` returns Semantic Markdown format
+4. Test helpers established for ToolResponse validation
+5. All existing tests pass (213+)
+6. New tests validate JSON structure of responses
 
+---
+
+## Boomerang Protocol
+
+Workers must return structured completion:
 ```json
 {
   "type": "task-completed",
-  "task_id": "1.4-red",
-  "run_id": "rpg-lite-build-001",
-  "from": "red-phase",
-  "to": "orchestrator",
-  "status": "success",
-  "files_changed": ["tests/combat/create_encounter.test.ts"],
-  "tests_run": ["npm test -- create_encounter"],
-  "summary": "Wrote 8 failing tests for create_encounter",
-  "notes": "Tests verify: encounter creation, participant management, initiative rolling, invalid input handling"
-}
-```
-
-### Green Phase Task Completion
-
-```json
-{
-  "type": "task-completed",
-  "task_id": "1.4-green",
-  "run_id": "rpg-lite-build-001",
-  "from": "green-phase",
-  "to": "orchestrator",
-  "status": "success",
-  "files_changed": [
-    "src/modules/combat.ts",
-    "src/registry.ts"
-  ],
-  "tests_run": ["npm test -- create_encounter"],
-  "summary": "Implemented create_encounter - all 8 tests passing",
-  "notes": "Minimal implementation, ready for blue phase polish"
-}
-```
-
-### Blue Phase Task Completion
-
-```json
-{
-  "type": "task-completed",
-  "task_id": "1.4-blue",
-  "run_id": "rpg-lite-build-001",
-  "from": "blue-phase",
-  "to": "orchestrator",
-  "status": "success",
-  "files_changed": [
-    "src/modules/combat.ts",
-    "tests/combat/create_encounter.test.ts"
-  ],
-  "tests_run": ["npm test -- create_encounter"],
-  "summary": "Refactored create_encounter - improvements: extracted helpers, ASCII output",
-  "notes": "Quality improvements: added  to output, extracted validation utilities, improved type safety"
-}
-```
-
-### Escalation (Any Phase)
-
-```json
-{
-  "type": "escalation",
-  "task_id": "1.5-green",
-  "run_id": "rpg-lite-build-001",
-  "from": "green-phase",
-  "to": "orchestrator",
-  "status": "blocked",
-  "reason": "execute_action depends on apply_damage which is not implemented",
-  "attempted": ["Stubbed apply_damage to return success"],
-  "proposed_next_steps": [
-    "Option A: Implement apply_damage first (task 1.6 TDD cycle)",
-    "Option B: Accept stub for initial implementation"
-  ]
+  "task_id": "1.1|1.2|1.3|1.4",
+  "status": "success|failed|blocked",
+  "files_changed": ["src/modules/markdown-format.ts"],
+  "tests_run": ["npm test"],
+  "summary": "Created markdown format module with 8 exported functions",
+  "notes": "Consider adding formatInitiativeTable for Sprint 2"
 }
 ```
 
 ---
 
-## 📁 File Structure Map
+## Escalation Triggers
 
-```
-rpg-lite-mcp/
-├── DESIGN.md              # Architecture reference (read-only)
-├── SCHEMAS.md             # Living schema documentation
-├── TOOLS_CHECKLIST.md     # Progress tracker
-├── ORCHESTRATOR_PROMPT.md # This file
-│
-├── src/
-│   ├── index.ts           # MCP Server entry (DO NOT TOUCH)
-│   ├── registry.ts        # Tool registration hub
-│   ├── types/             # Shared types & enums
-│   │   ├── actions.ts     # ActionType, DamageType, etc.
-│   │   ├── conditions.ts  # Condition enum
-│   │   └── schemas.ts     # Reusable Zod schemas
-│   └── modules/
-│       ├── dice.ts        # ✅ roll_dice implemented
-│       ├── characters.ts  # Character CRUD + checks
-│       ├── combat.ts      # Encounter lifecycle
-│       ├── spatial.ts     # AoE, LoS, cover
-│       ├── magic.ts       # Spells, concentration
-│       └── data.ts        # Sessions, locations, notes
-│
-├── tests/
-│   ├── helpers.ts         # SDK type mocks
-│   ├── characters/
-│   │   ├── create_character.test.ts  # ✅ 25 tests
-│   │   ├── get_character.test.ts     # ✅ 23 tests
-│   │   ├── update_character.test.ts  # ✅ 36 tests
-│   │   ├── roll_check.test.ts        # ✅ 46 tests
-│   │   └── hp_delta.test.ts          # ✅ HP delta tests
-│   ├── combat/
-│   │   ├── roll_dice.test.ts         # ✅ 8 tests
-│   │   ├── create_encounter.test.ts  # ✅ 43 tests
-│   │   ├── manage_condition.test.ts  # ✅ condition tests
-│   │   └── batch_roll.test.ts        # ✅ batch rolling
-│   ├── spatial/
-│   │   └── measure_distance.test.ts  # ✅ 9 tests
-│   └── foundation/
-│       └── registry.test.ts          # ✅ registry tests
-│
-└── data/                  # Runtime JSON persistence
-    ├── characters/
-    ├── encounters/
-    ├── sessions/
-    └── locations/
-```
+Escalate to Architect if:
+- Format spec is ambiguous or conflicting
+- Breaking change to tool API signature required
+- New dependency needed
+
+Escalate to Debug if:
+- Tests fail after migration
+- Runtime errors in tool handlers
 
 ---
 
-## ✅ Quality Gates
-
-Before marking ANY task complete, verify:
-
-| Check      | Command                  | Pass Criteria             |
-| ---------- | ------------------------ | ------------------------- |
-| TypeScript | `npm run build`          | No errors                 |
-| Tests      | `npm test`               | All green                 |
-| Coverage   | `npm test -- --coverage` | >80% for new code         |
-| Schema     | Manual                   | Matches SCHEMAS.md        |
-| Output     | Manual                   | ASCII |
-
----
-
-## 🛡️ Parallel Execution Safety
-
-### Safe to Parallelize
-
-- TDD phases with non-overlapping `workspace_path`
-- Red phases for different tools (tests don't conflict)
-- Any tasks with explicitly disjoint `file_patterns`
-
-### NOT Safe to Parallelize
-
-- Multiple green phases editing `src/registry.ts`
-- TDD phases with overlapping module files
-- Any task with unmet dependencies
-
-### Orchestrator Responsibility
-
-When assigning parallel tasks:
-
-1. Verify scopes do not overlap
-2. If ambiguous, serialize tasks
-3. Track dependencies in Task Map
-
----
-
-## 🚦 Current Project State
-
-**Last Updated:** 2025-12-18
-
-| Metric         | Value              |
-| -------------- | ------------------ |
-| Tools Complete | 8/50 (16%)         |
-| Tests Passing  | 213                |
-| Test Files     | 11                 |
-| Blocking Bugs  | 0                  |
-| Current Phase  | Tier 1: Foundation |
-
-**Active Run:** `rpg-lite-build-001`
-
-**Completed Tools:**
-- ✅ `roll_dice` - Dice rolling with expressions
-- ✅ `create_character` - Character creation with D&D 5e stats
-- ✅ `get_character` - Character retrieval with batch support
-- ✅ `update_character` - Character updates with HP delta
-- ✅ `measure_distance` - Grid-based distance calculation
-- ✅ `manage_condition` - Condition management with 5e effects
-- ✅ `create_encounter` - Combat encounter creation
-- ✅ `roll_check` - Skill/ability/save/attack/initiative checks
-
-**Next Subtasks:**
-
-1. `1.5-red` - Write failing tests for `execute_action` (red-phase)
-2. `1.5-green` - Implement `execute_action` (green-phase)
-3. `1.5-blue` - Refactor and polish (blue-phase)
-
-**Tool Consolidation Notes:**
-- ⚫ `apply_damage` absorbed into `execute_action` (damage is an action type)
-- ✅ `update_character.hp` already handles HP changes outside combat
-- 🔄 `execute_action` = Hub for Move, Attack, Heal, Spell, Lair actions
-
----
-
-## 🔄 Redundancy Analysis (Tool Consolidation)
-
-Based on review of DESIGN.md and implemented tools, the following redundancies were identified:
-
-### Absorbed/Removed Tools
-
-| Original Tool | Absorbed Into | Rationale |
-|--------------|---------------|-----------|
-| `apply_damage` | `execute_action` | Damage is an action outcome; `update_character.hp` handles out-of-combat HP |
-| `quick_roll` | `roll_dice` | `roll_dice` already supports simple expressions |
-
-### Potential Future Consolidations
-
-| Tool | Consider Merging With | Analysis Needed |
-|------|----------------------|-----------------|
-| `break_concentration` | `manage_condition` | Concentration could be a condition type |
-| `get_concentration` | `manage_condition` | Query existing condition state |
-| `process_aura` | `advance_turn` | Aura processing is turn-based |
-| `get_adjacent_squares` | `calculate_movement` | Adjacent squares are subset of movement options |
-
-### Keep Separate (Confirmed Distinct)
-
-| Tool | Reason |
-|------|--------|
-| `roll_check` vs `roll_dice` | Different semantics: checks have DC/skills, dice are raw rolls |
-| `create_encounter` vs `execute_action` | Creation vs execution lifecycle |
-| `manage_condition` vs `update_character` | Conditions are encounter-scoped, character updates are persistent |
-
----
-
-## 📖 Reference Documents
-
-| Document             | Purpose                      | Mode Access        |
-| -------------------- | ---------------------------- | ------------------ |
-| `DESIGN.md`          | Architecture, tool inventory | read-only          |
-| `SCHEMAS.md`         | Zod schemas, example I/O     | architect: edit    |
-| `TOOLS_CHECKLIST.md` | Implementation status        | orchestrator: edit |
-| `design docs/`       | Extended D&D 5e reference    | read-only          |
-
----
-
-## 🔀 Mode Delegation Reference
-
-| Mode          | Use When                          | Permissions         |
-| ------------- | --------------------------------- | ------------------- |
-| `red-phase`   | Writing failing tests             | read, edit (tests)  |
-| `green-phase` | Implementing minimal code         | read, edit (src)    |
-| `blue-phase`  | Refactoring and polishing         | read, edit (all)    |
-| `code`        | Complex implementation work       | read, edit, command |
-| `architect`   | Designing schemas or ADRs         | read, edit (.md)    |
-| `planner`     | Creating Task Maps                | read, edit          |
-| `debug`       | Investigating test failures       | read, command       |
-| `ask`         | Clarifying requirements           | read                |
-
----
-
-_Orchestrator Protocol v3.0 (TDD-Aligned)_  
-_Advanced Multi-Agent AI Framework_  
-_Project: rpg-lite-mcp_
+_Orchestrator Prompt v1.0 • ChatRPG Refactor Sprint 1_

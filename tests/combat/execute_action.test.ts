@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { handleToolCall } from '../../src/registry.js';
-import { getTextContent } from '../helpers.js';
+import { getTextContent, parseToolResponse } from '../helpers.js';
 import { createEncounter, clearAllEncounters, getEncounter, getEncounterParticipant } from '../../src/modules/combat.js';
 
 // Helper to create a standard test encounter
@@ -51,9 +51,9 @@ function createTestEncounter() {
     lighting: 'bright',
   });
 
-  // Extract encounter ID from result
-  const idMatch = result.match(/Encounter ID: ([a-zA-Z0-9-]+)/);
-  return idMatch ? idMatch[1] : '';
+  // Extract encounter ID from ToolResponse JSON
+  const response = JSON.parse(result);
+  return response.data?.encounterId || '';
 }
 
 describe('execute_action', () => {
@@ -90,7 +90,7 @@ describe('execute_action', () => {
     it('should hit when attack roll meets or exceeds AC', async () => {
       const encounterId = createTestEncounter();
 
-      // Use manual roll to guarantee a hit (20 vs AC 13)
+      // Use manual roll to guarantee a hit (15 vs AC 13)
       const result = await handleToolCall('execute_action', {
         encounterId,
         actorId: 'fighter-1',
@@ -102,9 +102,9 @@ describe('execute_action', () => {
         manualAttackRoll: 15, // Beats AC 13
       });
 
-      const text = getTextContent(result);
-      expect(text).toMatch(/hit/i);
-      expect(text).not.toMatch(/miss/i);
+      const response = parseToolResponse(result);
+      expect(response.data.attack.hit).toBe(true);
+      expect(response.display).toMatch(/hit/i);
     });
 
     it('should miss when attack roll is below AC', async () => {
@@ -508,8 +508,8 @@ describe('execute_action', () => {
   // ASCII OUTPUT TESTS
   // ============================================================
 
-  describe('ASCII Output', () => {
-    it('should return ASCII formatted output', async () => {
+  describe('Semantic Markdown Output', () => {
+    it('should return valid ToolResponse JSON', async () => {
       const encounterId = createTestEncounter();
 
       const result = await handleToolCall('execute_action', {
@@ -523,12 +523,11 @@ describe('execute_action', () => {
         manualAttackRoll: 15,
       });
 
-      const text = getTextContent(result);
-      // Should have ASCII box borders
-      expect(text).toContain('╔');
-      expect(text).toContain('╗');
-      expect(text).toContain('╚');
-      expect(text).toContain('╝');
+      const response = parseToolResponse(result);
+      expect(response).toHaveProperty('display');
+      expect(response).toHaveProperty('data');
+      expect(response.data.type).toBe('action');
+      expect(response.data.actionType).toBe('attack');
     });
   });
 
@@ -561,7 +560,7 @@ describe('execute_action', () => {
         actionType: 'disengage',
       });
 
-      // Move away from goblin (fighter at 5,5 moving to 0,5 - away from goblin at 7,5)
+      // Move away from goblin (fighter at 5,5 moving to 0,5 - away from goblin at 6,5)
       const moveResult = await handleToolCall('execute_action', {
         encounterId,
         actorId: 'fighter-1',
@@ -569,9 +568,9 @@ describe('execute_action', () => {
         moveTo: { x: 0, y: 5 },
       });
 
-      // Should NOT trigger opportunity attack
-      const text = getTextContent(moveResult);
-      expect(text).not.toMatch(/opportunity/i);
+      // Should NOT trigger opportunity attack - check data object
+      const response = parseToolResponse(moveResult);
+      expect(response.data.opportunityAttacks).toHaveLength(0);
     });
   });
 

@@ -15,6 +15,15 @@ import {
   BOX
 } from './ascii-art.js';
 import {
+  ToolResponse,
+  toResponse,
+  formatHpBar,
+  formatAbilityScores,
+  formatConditionIcon,
+  formatModifier,
+  calculateModifier as calculateModifierMarkdown
+} from './markdown-format.js';
+import {
   AbilitySchema,
   DamageTypeSchema,
   ConditionSchema,
@@ -365,8 +374,8 @@ export function createCharacter(input: CreateCharacterInput): {
   const filePath = path.join(dataDir, `${id}.json`);
   fs.writeFileSync(filePath, JSON.stringify(character, null, 2), 'utf-8');
 
-  // Format markdown output
-  const markdown = formatCharacterSheet(character);
+  // Format markdown output as ToolResponse JSON
+  const markdown = formatCharacterDisplay(character);
 
   return {
     success: true,
@@ -379,8 +388,190 @@ export function createCharacter(input: CreateCharacterInput): {
 // FORMATTING
 // ============================================================
 
+/**
+ * Formats a character as Semantic Markdown with ToolResponse JSON
+ * Returns the JSON stringified ToolResponse instead of ASCII art
+ */
+function formatCharacterDisplay(character: Character): string {
+  const display: string[] = [];
+
+  // Header
+  display.push(`## ⚔️ Character Created: ${character.name}`);
+  display.push('');
+  display.push(`**Level ${character.level} ${character.race} ${character.class}**`);
+  display.push('');
+
+  // Vital Stats section
+  display.push('### Vital Stats');
+  display.push(`- **HP:** ${formatHpBar(character.hp, character.maxHp)}`);
+  display.push(`- **AC:** ${character.ac}`);
+  display.push(`- **Speed:** ${character.speed} ft`);
+  display.push(`- **Initiative:** +${calculateModifierMarkdown(character.stats.dex)}`);
+  display.push(`- **Proficiency:** +${character.proficiencyBonus}`);
+  display.push('');
+
+  // Ability Scores section (using the markdown formatter)
+  display.push('### Ability Scores');
+  display.push('');
+  display.push(formatAbilityScores(character.stats));
+  display.push('');
+
+  // Active Conditions (if any)
+  const activeConditions = getActiveConditions(character.id);
+  if (activeConditions.length > 0) {
+    display.push('### Active Conditions');
+    display.push('');
+    for (const cond of activeConditions) {
+      const condName = typeof cond.condition === 'string'
+        ? cond.condition.charAt(0).toUpperCase() + cond.condition.slice(1)
+        : cond.condition;
+      const icon = formatConditionIcon(cond.condition);
+      display.push(`- ${icon} **${condName}**`);
+      if (cond.roundsRemaining !== undefined) {
+        display.push(`  Duration: ${cond.roundsRemaining} round${cond.roundsRemaining !== 1 ? 's' : ''}`);
+      }
+    }
+    display.push('');
+  }
+
+  // Equipment (if any)
+  if (character.equipment && character.equipment.length > 0) {
+    display.push('### Equipment');
+    display.push('');
+    character.equipment.forEach(item => {
+      display.push(`- ${item}`);
+    });
+    display.push('');
+  }
+
+  // Footer
+  display.push('---');
+  display.push(`*Character ID: \`${character.id}\`*`);
+  display.push('');
+  display.push('**Next:** Add equipment and background, set character portrait description');
+
+  // Build the ToolResponse
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'character',
+      character: {
+        id: character.id,
+        name: character.name,
+        level: character.level,
+        class: character.class,
+        race: character.race,
+        hp: { current: character.hp, max: character.maxHp },
+        ac: character.ac,
+        speed: character.speed,
+        stats: character.stats,
+        proficiencyBonus: character.proficiencyBonus,
+      },
+    },
+    suggestions: [
+      'Add equipment and background',
+      'Roll for ability scores with 4d6 drop lowest',
+      'Set character portrait description',
+    ],
+  };
+
+  return toResponse(response);
+}
+
+/**
+ * Formats a character for get_character as Semantic Markdown with ToolResponse JSON
+ * Returns the JSON stringified ToolResponse
+ */
+function formatGetCharacterDisplay(character: Character): string {
+  const display: string[] = [];
+
+  // Header
+  display.push(`## 📜 ${character.name}`);
+  display.push('');
+  display.push(`**Level ${character.level} ${character.race} ${character.class}**`);
+  display.push('');
+
+  // Combat Stats table
+  display.push('### Combat Stats');
+  const initMod = calculateModifierMarkdown(character.stats.dex);
+  display.push('| HP | AC | Speed | Init |');
+  display.push('|:--:|:--:|:-----:|:----:|');
+  display.push(`| ${character.hp}/${character.maxHp} | ${character.ac} | ${character.speed} ft | +${initMod} |`);
+  display.push('');
+  display.push(formatHpBar(character.hp, character.maxHp));
+  display.push('');
+
+  // Ability Scores section
+  display.push('### Ability Scores');
+  display.push('');
+  display.push(formatAbilityScores(character.stats));
+  display.push('');
+
+  // Active Conditions
+  display.push('### Active Conditions');
+  const activeConditions = getActiveConditions(character.id);
+  if (activeConditions.length > 0) {
+    for (const cond of activeConditions) {
+      const condName = typeof cond.condition === 'string'
+        ? cond.condition.charAt(0).toUpperCase() + cond.condition.slice(1)
+        : cond.condition;
+      const icon = formatConditionIcon(cond.condition);
+      let condLine = `- ${icon} **${condName}**`;
+      if (cond.roundsRemaining !== undefined) {
+        condLine += ` (${cond.roundsRemaining} round${cond.roundsRemaining !== 1 ? 's' : ''})`;
+      }
+      display.push(condLine);
+    }
+  } else {
+    display.push('None');
+  }
+  display.push('');
+
+  // Equipment (if any)
+  if (character.equipment && character.equipment.length > 0) {
+    display.push('### Equipment');
+    character.equipment.forEach(item => {
+      display.push(`- ${item}`);
+    });
+    display.push('');
+  }
+
+  // Footer
+  display.push('---');
+  display.push(`*ID: \`${character.id}\`*`);
+
+  // Build the ToolResponse
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'character',
+      character: {
+        id: character.id,
+        name: character.name,
+        level: character.level,
+        class: character.class,
+        race: character.race,
+        hp: { current: character.hp, max: character.maxHp },
+        ac: character.ac,
+        speed: character.speed,
+        stats: character.stats,
+        proficiencyBonus: character.proficiencyBonus,
+        conditions: activeConditions.map(c => ({
+          name: c.condition,
+          roundsRemaining: c.roundsRemaining,
+        })),
+      },
+    },
+  };
+
+  return toResponse(response);
+}
+
+// Legacy ASCII art formatter (kept for reference, will be deprecated)
 function formatCharacterSheet(character: Character): string {
-  const content: string[] = [];
+   const content: string[] = [];
   const box = BOX.LIGHT;
   const WIDTH = 68;
 
@@ -642,6 +833,163 @@ function formatCharacterSheet(character: Character): string {
   return createBox('CHARACTER SHEET', content, undefined, 'HEAVY');
 }
 
+/**
+ * Formats a character update as Semantic Markdown with ToolResponse JSON
+ * Shows before/after comparison for changed fields
+ * Returns the JSON stringified ToolResponse
+ */
+function formatUpdateCharacterDisplay(
+  before: Character,
+  after: Character,
+  updates: z.infer<typeof singleUpdateSchema>
+): string {
+  const display: string[] = [];
+  const changes: Array<{field: string; before: string; after: string; delta?: number}> = [];
+
+  // Header
+  display.push(`## 📋 Update: ${after.name}`);
+  display.push('');
+
+  // Build changes list and markdown
+  display.push('### Changes');
+  display.push('');
+
+  // HP with delta notation
+  if (before.hp !== after.hp) {
+    const delta = after.hp - before.hp;
+    const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
+    display.push(`**HP:** ${before.hp} → ${after.hp} (${deltaStr})`);
+    display.push(formatHpBar(after.hp, after.maxHp));
+    display.push('');
+    changes.push({ field: 'hp', before: `${before.hp}`, after: `${after.hp}`, delta });
+  }
+
+  // Max HP
+  if (before.maxHp !== after.maxHp) {
+    display.push(`**Max HP:** ${before.maxHp} → ${after.maxHp}`);
+    changes.push({ field: 'maxHp', before: `${before.maxHp}`, after: `${after.maxHp}` });
+  }
+
+  // Name
+  if (before.name !== after.name) {
+    display.push(`**Name:** ${before.name} → ${after.name}`);
+    changes.push({ field: 'name', before: before.name, after: after.name });
+  }
+
+  // Level
+  if (before.level !== after.level) {
+    display.push(`**Level:** ${before.level} → ${after.level}`);
+    changes.push({ field: 'level', before: `${before.level}`, after: `${after.level}` });
+  }
+
+  // Proficiency Bonus
+  if (before.proficiencyBonus !== after.proficiencyBonus) {
+    display.push(`**Proficiency Bonus:** +${before.proficiencyBonus} → +${after.proficiencyBonus}`);
+    changes.push({ field: 'proficiencyBonus', before: `+${before.proficiencyBonus}`, after: `+${after.proficiencyBonus}` });
+  }
+
+  // AC
+  if (before.ac !== after.ac) {
+    display.push(`**AC:** ${before.ac} → ${after.ac}`);
+    changes.push({ field: 'ac', before: `${before.ac}`, after: `${after.ac}` });
+  }
+
+  // Speed
+  if (before.speed !== after.speed) {
+    display.push(`**Speed:** ${before.speed} ft → ${after.speed} ft`);
+    changes.push({ field: 'speed', before: `${before.speed}`, after: `${after.speed}` });
+  }
+
+  // Race
+  if (before.race !== after.race) {
+    display.push(`**Race:** ${before.race} → ${after.race}`);
+    changes.push({ field: 'race', before: before.race, after: after.race });
+  }
+
+  // Class
+  if (before.class !== after.class) {
+    display.push(`**Class:** ${before.class} → ${after.class}`);
+    changes.push({ field: 'class', before: before.class, after: after.class });
+  }
+
+  // Ability Scores
+  const abilities: Array<{ key: keyof Character['stats']; name: string }> = [
+    { key: 'str', name: 'STR' },
+    { key: 'dex', name: 'DEX' },
+    { key: 'con', name: 'CON' },
+    { key: 'int', name: 'INT' },
+    { key: 'wis', name: 'WIS' },
+    { key: 'cha', name: 'CHA' },
+  ];
+
+  abilities.forEach(({ key, name }) => {
+    if (before.stats[key] !== after.stats[key]) {
+      const beforeMod = calculateModifier(before.stats[key]);
+      const afterMod = calculateModifier(after.stats[key]);
+      const beforeStr = `${before.stats[key]} (${formatModifier(beforeMod)})`;
+      const afterStr = `${after.stats[key]} (${formatModifier(afterMod)})`;
+      display.push(`**${name}:** ${beforeStr} → ${afterStr}`);
+      changes.push({ field: key, before: beforeStr, after: afterStr });
+    }
+  });
+
+  // Equipment
+  if (updates.equipment !== undefined) {
+    display.push('');
+    display.push('**Equipment:**');
+    after.equipment?.forEach(item => {
+      display.push(`- ${item}`);
+    });
+    changes.push({ field: 'equipment', before: 'updated', after: `${after.equipment?.length || 0} items` });
+  }
+
+  // Resistances/Immunities
+  if (updates.resistances !== undefined && after.resistances && after.resistances.length > 0) {
+    display.push(`**Resistances:** ${after.resistances.join(', ')}`);
+    changes.push({ field: 'resistances', before: 'updated', after: after.resistances.join(', ') });
+  }
+
+  if (updates.immunities !== undefined && after.immunities && after.immunities.length > 0) {
+    display.push(`**Immunities:** ${after.immunities.join(', ')}`);
+    changes.push({ field: 'immunities', before: 'updated', after: after.immunities.join(', ') });
+  }
+
+  // Spellcasting
+  if (updates.spellcastingAbility !== undefined) {
+    display.push(`**Spellcasting Ability:** ${after.spellcastingAbility?.toUpperCase()}`);
+    changes.push({ field: 'spellcastingAbility', before: 'updated', after: after.spellcastingAbility || '' });
+  }
+
+  display.push('');
+  display.push('---');
+  display.push(`*ID: \`${after.id}\`*`);
+
+  // Build the ToolResponse
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'update',
+      changes,
+      character: {
+        id: after.id,
+        name: after.name,
+        level: after.level,
+        class: after.class,
+        race: after.race,
+        hp: { current: after.hp, max: after.maxHp },
+        ac: after.ac,
+        speed: after.speed,
+        stats: after.stats,
+        proficiencyBonus: after.proficiencyBonus,
+      },
+    },
+  };
+
+  return toResponse(response);
+}
+
+// Legacy ASCII art formatter (kept for reference, will be deprecated)
 // Format character update showing before/after comparison
 function formatCharacterUpdate(
   before: Character,
@@ -1026,7 +1374,7 @@ export function updateCharacter(input: UpdateCharacterInput): {
   }
 
   // Format output showing before/after comparison
-  const markdown = formatCharacterUpdate(originalCharacter, updatedCharacter, singleInput);
+  const markdown = formatUpdateCharacterDisplay(originalCharacter, updatedCharacter, singleInput);
 
   return {
     success: true,
@@ -1045,6 +1393,7 @@ function updateCharacterBatch(updates: Array<z.infer<typeof singleUpdateSchema>>
   error?: string;
 } {
   const results: Array<{
+    id: string;
     name: string;
     success: boolean;
     hpBefore?: number;
@@ -1062,6 +1411,7 @@ function updateCharacterBatch(updates: Array<z.infer<typeof singleUpdateSchema>>
       const foundId = findCharacterByName(update.characterName);
       if (!foundId) {
         results.push({
+          id: '',
           name: update.characterName || update.characterId || 'Unknown',
           success: false,
           changes: [],
@@ -1074,6 +1424,7 @@ function updateCharacterBatch(updates: Array<z.infer<typeof singleUpdateSchema>>
 
     if (!characterId) {
       results.push({
+        id: '',
         name: 'Unknown',
         success: false,
         changes: [],
@@ -1087,6 +1438,7 @@ function updateCharacterBatch(updates: Array<z.infer<typeof singleUpdateSchema>>
 
     if (!singleResult.success) {
       results.push({
+        id: characterId,
         name: update.characterName || update.characterId || 'Unknown',
         success: false,
         changes: [],
@@ -1101,6 +1453,7 @@ function updateCharacterBatch(updates: Array<z.infer<typeof singleUpdateSchema>>
 
     if (update.hp !== undefined) {
       results.push({
+        id: characterId,
         name: char.name,
         success: true,
         hpBefore: typeof update.hp === 'string' ? char.hp - parseInt(update.hp, 10) : undefined,
@@ -1110,6 +1463,7 @@ function updateCharacterBatch(updates: Array<z.infer<typeof singleUpdateSchema>>
       });
     } else {
       results.push({
+        id: characterId,
         name: char.name,
         success: true,
         changes,
@@ -1117,14 +1471,29 @@ function updateCharacterBatch(updates: Array<z.infer<typeof singleUpdateSchema>>
     }
   }
 
-  // Format batch output
+  // Format batch output - return JSON format
+  const response: ToolResponse = {
+    display: formatBatchUpdateDisplay(results),
+    data: {
+      success: true,
+      type: 'batch_update',
+      results: results.map(r => ({
+        id: r.id,
+        name: r.name,
+        success: r.success,
+        hp: r.hpAfter !== undefined ? { before: r.hpBefore, after: r.hpAfter, max: r.maxHp } : undefined,
+        error: r.error,
+      })),
+    },
+  };
   return {
     success: true,
-    markdown: formatBatchUpdate(results),
+    markdown: toResponse(response),
   };
 }
 
-function formatBatchUpdate(results: Array<{
+function formatBatchUpdateDisplay(results: Array<{
+  id: string;
   name: string;
   success: boolean;
   hpBefore?: number;
@@ -1133,38 +1502,37 @@ function formatBatchUpdate(results: Array<{
   changes: string[];
   error?: string;
 }>): string {
-  const content: string[] = [];
-  const box = BOX.LIGHT;
-
-  content.push(centerText(`Updated ${results.length} character${results.length !== 1 ? 's' : ''}`, 68));
-  content.push('');
-  content.push(box.H.repeat(68));
-  content.push('');
+  const display: string[] = [];
+  
+  display.push(`## 📋 Batch Update`);
+  display.push('');
+  display.push(`Updated ${results.length} character${results.length !== 1 ? 's' : ''}`);
+  display.push('');
 
   for (const result of results) {
     if (!result.success) {
-      content.push(padText(`✗ ${result.name}`, 68, 'left'));
-      content.push(padText(`  Error: ${result.error}`, 68, 'left'));
+      display.push(`### ❌ ${result.name}`);
+      display.push(`**Error:** ${result.error}`);
     } else {
-      content.push(padText(`✓ ${result.name}`, 68, 'left'));
+      display.push(`### ✅ ${result.name}`);
 
       if (result.hpBefore !== undefined && result.hpAfter !== undefined) {
-        const hpBar = createStatusBar(result.hpAfter, result.maxHp || result.hpAfter, 40, 'HP');
-        content.push(padText(`  HP: ${result.hpBefore} → ${result.hpAfter}/${result.maxHp}`, 68, 'left'));
-        content.push(padText(`  ${hpBar}`, 68, 'left'));
+        const delta = result.hpAfter - result.hpBefore;
+        const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
+        display.push(`**HP:** ${result.hpBefore} → ${result.hpAfter}/${result.maxHp} (${deltaStr})`);
+        display.push(formatHpBar(result.hpAfter, result.maxHp || result.hpAfter));
       }
     }
-
-    content.push('');
+    display.push('');
   }
 
   const successCount = results.filter(r => r.success).length;
   const failCount = results.length - successCount;
 
-  content.push(box.H.repeat(68));
-  content.push(centerText(`Success: ${successCount} | Failed: ${failCount}`, 68));
+  display.push('---');
+  display.push(`**Summary:** ✅ ${successCount} succeeded | ❌ ${failCount} failed`);
 
-  return createBox('BATCH CHARACTER UPDATE', content, undefined, 'HEAVY');
+  return display.join('\n');
 }
 
 // ============================================================
@@ -1226,7 +1594,7 @@ export function getCharacter(input: GetCharacterInput): {
     const character: Character = JSON.parse(fileContent);
 
     // Format markdown output using the same formatter as create
-    const markdown = formatCharacterSheet(character);
+    const markdown = formatGetCharacterDisplay(character);
 
     return {
       success: true,
@@ -1616,6 +1984,7 @@ export function rollCheck(input: RollCheckInput): {
 /**
  * Handles contested checks between two characters
  * Uses performRoll() directly for structured data instead of parsing markdown
+ * Returns ToolResponse JSON format for Semantic Markdown
  */
 function handleContestedCheck(
   input: RollCheckInput,
@@ -1673,45 +2042,103 @@ function handleContestedCheck(
   const check1Name = roll1.result.checkName;
   const check2Name = roll2.result.checkName;
 
-  // Determine winner (ties favor defender - character 2)
-  let winner: string;
-  if (total1 > total2) {
-    winner = character1?.name || 'Character 1';
-  } else if (total2 > total1) {
-    winner = character2.name;
-  } else {
-    winner = 'Tie (defender wins)';
-  }
-
-  // Format contested output
-  const content: string[] = [];
-  const WIDTH = 68;
-
-  content.push(centerText('CONTESTED CHECK', WIDTH));
-  content.push('');
-  content.push(BOX.LIGHT.H.repeat(WIDTH));
-  content.push('');
-
   const char1Name = character1?.name || 'Unknown';
   const char2Name = character2.name;
 
-  content.push(padText(`${char1Name} (${check1Name}): ${total1}`, WIDTH, 'left'));
-  content.push(padText(`${char2Name} (${check2Name}): ${total2}`, WIDTH, 'left'));
-  content.push('');
-  content.push(centerText(`${total1} vs ${total2}`, WIDTH));
-  content.push('');
-  content.push(BOX.LIGHT.H.repeat(WIDTH));
-  content.push('');
-  content.push(centerText(`WINNER: ${winner}`, WIDTH));
+  // Determine winner (ties favor defender - character 2)
+  let winner: string;
+  let char1Won: boolean | null;
+  if (total1 > total2) {
+    winner = char1Name;
+    char1Won = true;
+  } else if (total2 > total1) {
+    winner = char2Name;
+    char1Won = false;
+  } else {
+    winner = `${char2Name} (Tie - defender wins)`;
+    char1Won = false;
+  }
+
+  // Format contested output as Semantic Markdown
+  const display: string[] = [];
+
+  display.push('## ⚔️ Contested Check');
+  display.push('');
+  display.push(`### ${char1Name} vs ${char2Name}`);
+  display.push('');
+  display.push(`| Combatant | Check | Roll | Total |`);
+  display.push('|:----------|:------|:----:|:-----:|');
+  display.push(`| **${char1Name}** | ${check1Name} | [${roll1.result.naturalRoll}] ${formatModifierSign(roll1.result.totalMod)} | **${total1}** |`);
+  display.push(`| ${char2Name} | ${check2Name} | [${roll2.result.naturalRoll}] ${formatModifierSign(roll2.result.totalMod)} | **${total2}** |`);
+  display.push('');
+  display.push(`**Result:** ${total1} vs ${total2}`);
+  display.push('');
+  display.push(`### 🏆 Winner: ${winner}`);
+
+  // Build the ToolResponse
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'contested_check',
+      character1: {
+        name: char1Name,
+        checkName: check1Name,
+        roll: roll1.result.naturalRoll,
+        modifier: roll1.result.totalMod,
+        total: total1,
+      },
+      character2: {
+        name: char2Name,
+        checkName: check2Name,
+        roll: roll2.result.naturalRoll,
+        modifier: roll2.result.totalMod,
+        total: total2,
+      },
+      winner,
+      char1Won,
+      tie: total1 === total2,
+    },
+  };
 
   return {
     success: true,
-    markdown: createBox('CONTESTED CHECK', content, undefined, 'HEAVY'),
+    markdown: toResponse(response),
   };
 }
 
 /**
- * Formats a roll check result into rich ASCII art output
+ * Formats roll display with advantage/disadvantage showing strikethrough on unused die
+ * Returns the formatted dice string for the display
+ */
+function formatRollWithAdvantage(
+  rolls: number[],
+  rollMode: 'normal' | 'advantage' | 'disadvantage' | 'cancelled',
+  totalMod: number
+): string {
+  const modStr = totalMod >= 0 ? `+${totalMod}` : `${totalMod}`;
+  
+  if (rollMode === 'advantage' && rolls.length >= 2) {
+    const higher = Math.max(...rolls);
+    const lower = Math.min(...rolls);
+    const total = higher + totalMod;
+    return `**d20 (Advantage):** [${higher}] ~~[${lower}]~~ ${modStr} = **${total}**`;
+  } else if (rollMode === 'disadvantage' && rolls.length >= 2) {
+    const higher = Math.max(...rolls);
+    const lower = Math.min(...rolls);
+    const total = lower + totalMod;
+    return `**d20 (Disadvantage):** ~~[${higher}]~~ [${lower}] ${modStr} = **${total}**`;
+  } else if (rollMode === 'cancelled') {
+    const total = rolls[0] + totalMod;
+    return `**d20 (Normal - Adv/Disadv Cancel):** [${rolls[0]}] ${modStr} = **${total}**`;
+  } else {
+    const total = rolls[0] + totalMod;
+    return `**Roll:** [${rolls[0]}] ${modStr} = **${total}**`;
+  }
+}
+
+/**
+ * Formats a roll check result into Semantic Markdown with ToolResponse JSON
  * Uses helper functions for DRY code and consistent formatting
  */
 function formatCheckResult(params: {
@@ -1730,98 +2157,123 @@ function formatCheckResult(params: {
   dc?: number;
   dcResult?: 'success' | 'failure';
 }): string {
-  const content: string[] = [];
-  const WIDTH = 68;
-  const box = BOX.LIGHT;
-
-  // Determine critical roll status for visual indicators
+  const display: string[] = [];
+  
+  // Determine critical roll status
   const isNat20 = params.naturalRoll === 20;
   const isNat1 = params.naturalRoll === 1;
-  const criticalIndicator = isNat20 ? ' ⭐' : isNat1 ? ' 💀' : '';
+  const critical: 'hit' | 'miss' | null = isNat20 ? 'hit' : isNat1 ? 'miss' : null;
 
-  // Title - build properly based on check type (using formatSkillName helper)
-  let title: string;
-
-  if (params.checkType === 'save') {
-    title = 'SAVING THROW';
-  } else if (params.checkType === 'attack') {
-    title = 'ATTACK ROLL';
-  } else if (params.checkType === 'initiative') {
-    title = 'INITIATIVE';
-  } else if (params.checkType === 'skill') {
-    // Use helper function for consistent title-casing
-    const skillName = formatSkillName(params.checkName);
-    title = skillName.toUpperCase() + ' CHECK';
+  // Build header based on check type with critical indicator
+  if (isNat20 && params.checkType === 'attack') {
+    display.push('## 💥 CRITICAL HIT!');
+  } else if (isNat1 && params.checkType === 'attack') {
+    display.push('## 💀 Critical Miss');
+  } else if (isNat20) {
+    display.push('## ✨ Natural 20!');
+    display.push('');
+    // Add the check type header after natural 20 indicator
+    if (params.checkType === 'skill') {
+      display.push(`### 🎯 ${formatSkillName(params.checkName)} Check`);
+    } else if (params.checkType === 'ability') {
+      display.push(`### 🎯 ${params.abilityKey.toUpperCase()} Check`);
+    } else if (params.checkType === 'save') {
+      display.push(`### 🛡️ ${params.abilityKey.toUpperCase()} Save`);
+    } else if (params.checkType === 'initiative') {
+      display.push(`### 🏃 Initiative`);
+    }
+  } else if (isNat1) {
+    display.push('## 😬 Natural 1');
+    display.push('');
+    // Add the check type header after natural 1 indicator
+    if (params.checkType === 'skill') {
+      display.push(`### 🎯 ${formatSkillName(params.checkName)} Check`);
+    } else if (params.checkType === 'ability') {
+      display.push(`### 🎯 ${params.abilityKey.toUpperCase()} Check`);
+    } else if (params.checkType === 'save') {
+      display.push(`### 🛡️ ${params.abilityKey.toUpperCase()} Save`);
+    } else if (params.checkType === 'initiative') {
+      display.push(`### 🏃 Initiative`);
+    }
   } else {
-    // Ability check
-    title = params.abilityKey.toUpperCase() + ' Check';
+    // Normal header based on check type
+    if (params.checkType === 'skill') {
+      display.push(`## 🎯 ${formatSkillName(params.checkName)} Check`);
+    } else if (params.checkType === 'ability') {
+      display.push(`## 🎯 ${params.abilityKey.toUpperCase()} Check`);
+    } else if (params.checkType === 'save') {
+      display.push(`## 🛡️ ${params.abilityKey.toUpperCase()} Save`);
+    } else if (params.checkType === 'attack') {
+      display.push(`## ⚔️ Attack Roll`);
+    } else if (params.checkType === 'initiative') {
+      display.push(`## 🏃 Initiative`);
+    }
   }
 
-  content.push(centerText(title, WIDTH));
+  display.push('');
 
+  // Character name if provided
   if (params.character) {
-    content.push(centerText(`Character: ${params.character}`, WIDTH));
+    display.push(`**Character:** ${params.character}`);
+    display.push('');
   }
 
-  content.push('');
-  content.push(box.H.repeat(WIDTH));
-  content.push('');
-
-  // Add check type description for certain types (using helper)
-  if (params.checkType === 'skill' && params.checkName) {
-    const skillName = formatSkillName(params.checkName);
-    content.push(padText(`Check Type: ${skillName}`, WIDTH, 'left'));
-  } else if (params.checkType === 'save') {
-    content.push(padText('Check Type: Save (SAVE)', WIDTH, 'left'));
-  } else if (params.checkType === 'initiative') {
-    content.push(padText('Check Type: Initiative', WIDTH, 'left'));
-  } else if (params.checkType === 'attack') {
-    content.push(padText('Check Type: Attack Roll', WIDTH, 'left'));
+  // DC (if provided and not initiative)
+  if (params.dc !== undefined && params.checkType !== 'initiative') {
+    display.push(`**DC:** ${params.dc}`);
   }
 
-  // Roll information with Advantage/Disadvantage indication and critical indicators
-  if (params.rollMode === 'advantage') {
-    const keptRoll = Math.max(...params.rolls);
-    const keptIndicator = keptRoll === 20 ? ' ⭐' : keptRoll === 1 ? ' 💀' : '';
-    content.push(padText(`Rolls: [${params.rolls.join(', ')}] (Advantage - kept ${keptRoll}${keptIndicator})`, WIDTH, 'left'));
-  } else if (params.rollMode === 'disadvantage') {
-    const keptRoll = Math.min(...params.rolls);
-    const keptIndicator = keptRoll === 20 ? ' ⭐' : keptRoll === 1 ? ' 💀' : '';
-    content.push(padText(`Rolls: [${params.rolls.join(', ')}] (Disadvantage - kept ${keptRoll}${keptIndicator})`, WIDTH, 'left'));
-  } else if (params.rollMode === 'cancelled') {
-    // Both advantage and disadvantage cancel out
-    content.push(padText(`Roll: ${params.naturalRoll}${criticalIndicator} (Cancel - Advantage and Disadvantage neither apply)`, WIDTH, 'left'));
-  } else {
-    content.push(padText(`Roll: ${params.naturalRoll}${criticalIndicator}`, WIDTH, 'left'));
-  }
+  // Roll display with advantage/disadvantage strikethrough
+  display.push(formatRollWithAdvantage(params.rolls, params.rollMode, params.totalMod));
 
-  // Modifier breakdown using helper function for consistent sign formatting
-  const abilityName = params.abilityKey.toUpperCase();
-  content.push(padText(`${abilityName} Modifier: ${formatModifierSign(params.abilityMod)}`, WIDTH, 'left'));
-
-  if (params.profMod > 0) {
-    content.push(padText(`Proficiency Bonus: ${formatModifierSign(params.profMod)}`, WIDTH, 'left'));
-  }
-
-  if (params.bonusMod !== 0) {
-    content.push(padText(`Additional Bonus: ${formatModifierSign(params.bonusMod)}`, WIDTH, 'left'));
-  }
-
-  // Display total modifier if there are multiple components
-  if (params.profMod > 0 || params.bonusMod !== 0) {
-    content.push(padText(`Total Modifier: ${formatModifierSign(params.totalMod)}`, WIDTH, 'left'));
-  }
-
-  content.push('');
-  content.push(box.H.repeat(WIDTH));
-  content.push(centerText(`Total: ${params.total}`, WIDTH));
-
-  // DC result with enhanced visual feedback
+  // Result (pass/fail) if DC provided
   if (params.dc !== undefined && params.dcResult) {
-    content.push('');
-    const resultSymbol = params.dcResult === 'success' ? '✓ SUCCESS' : '✗ FAILURE';
-    content.push(centerText(`DC ${params.dc}: ${resultSymbol}`, WIDTH));
+    if (params.checkType === 'save') {
+      display.push(`**Result:** ${params.dcResult === 'success' ? '✅ Save!' : '❌ Failed!'}`);
+    } else if (params.checkType === 'attack') {
+      display.push(`**Result:** ${params.dcResult === 'success' ? '✅ HIT!' : '❌ Miss'}`);
+    } else {
+      display.push(`**Result:** ${params.dcResult === 'success' ? '✅ Success!' : '❌ Failure'}`);
+    }
   }
 
-  return createBox(title, content, undefined, 'HEAVY');
+  display.push('');
+
+  // Modifier breakdown
+  display.push('### Modifier Breakdown');
+  display.push(`- **${params.abilityKey.toUpperCase()} Modifier:** ${formatModifierSign(params.abilityMod)}`);
+  if (params.profMod > 0) {
+    display.push(`- **Proficiency Bonus:** ${formatModifierSign(params.profMod)}`);
+  }
+  if (params.bonusMod !== 0) {
+    display.push(`- **Additional Bonus:** ${formatModifierSign(params.bonusMod)}`);
+  }
+  display.push(`- **Total Modifier:** ${formatModifierSign(params.totalMod)}`);
+
+  // Build the ToolResponse
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'check',
+      checkType: params.checkType as 'skill' | 'ability' | 'save' | 'attack' | 'initiative',
+      checkName: params.checkName,
+      character: params.character || null,
+      roll: params.naturalRoll,
+      modifier: params.totalMod,
+      total: params.total,
+      dc: params.dc || null,
+      passed: params.dcResult === 'success' ? true : params.dcResult === 'failure' ? false : null,
+      critical,
+      advantage: params.rollMode === 'advantage',
+      disadvantage: params.rollMode === 'disadvantage',
+      rolls: params.rolls,
+      abilityKey: params.abilityKey,
+      abilityMod: params.abilityMod,
+      profMod: params.profMod,
+      bonusMod: params.bonusMod,
+    },
+  };
+
+  return toResponse(response);
 }

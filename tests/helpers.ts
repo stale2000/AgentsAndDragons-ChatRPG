@@ -15,3 +15,11 @@ export function getTextContent(result: CallToolResult): string {
   }
   return '';
 }
+
+/**
+ * Parse a ToolResponse JSON from the text content
+ */
+export function parseToolResponse(result: CallToolResult): any {
+  const text = getTextContent(result);
+  return JSON.parse(text);
+}

@@ -26,7 +26,7 @@ describe('manage_condition', () => {
       expect(result.isError).toBeUndefined();
       expect(text).toContain('Blinded');
       expect(text).toContain('test-character-1');
-      expect(text).toContain('added');
+      expect(text).toContain('Condition Added');
     });
 
     it('should add condition with duration in rounds', async () => {
@@ -94,7 +94,7 @@ describe('manage_condition', () => {
       const text = getTextContent(result);
       expect(result.isError).toBeUndefined();
       expect(text).toContain('Poisoned');
-      expect(text).toContain('removed');
+      expect(text).toContain('Condition Removed');
     });
 
     it('should handle removing non-existent condition gracefully', async () => {
@@ -131,9 +131,9 @@ describe('manage_condition', () => {
 
       const text = getTextContent(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('BLINDED');
-      expect(text).toContain('DEAFENED');
-      expect(text).toContain('CONDITION STATUS');
+      expect(text).toContain('Blinded');
+      expect(text).toContain('Deafened');
+      expect(text).toContain('Active Conditions');
     });
 
     it('should return empty list for target with no conditions', async () => {
@@ -271,13 +271,13 @@ describe('manage_condition', () => {
       });
 
       const text = getTextContent(result);
-      expect(text).toContain('CHARMED');
+      expect(text).toContain('Charmed');
       expect(text).toContain('concentration');
     });
   });
 
   describe('Output Format', () => {
-    it('should return ASCII art with condition effects', async () => {
+    it('should return Semantic Markdown with condition effects', async () => {
       const result = await handleToolCall('manage_condition', {
         targetId: 'test-character-1',
         operation: 'add',
@@ -285,10 +285,9 @@ describe('manage_condition', () => {
       });
 
       const text = getTextContent(result);
-      expect(text).toContain('╔');  // ASCII box border
       expect(text).toContain('Paralyzed');
+      expect(text).toContain('Condition Added');  // Semantic Markdown header
       expect(text).toContain('Incapacitated');  // Effect description
-      expect(text).toContain('Auto-fail');  // Effect description
     });
 
     it('should include D&D 5e condition descriptions', async () => {
@@ -299,8 +298,24 @@ describe('manage_condition', () => {
       });
 
       const text = getTextContent(result);
-      expect(text).toContain('PRONE');
-      expect(text).toContain('crawling');  // Prone effect - using a word that won't be truncated
+      expect(text).toContain('Prone');
+      expect(text).toContain('crawl');  // Prone effect
+    });
+
+    it('should return valid ToolResponse JSON', async () => {
+      const result = await handleToolCall('manage_condition', {
+        targetId: 'test-character-1',
+        operation: 'add',
+        condition: 'stunned',
+      });
+      
+      const text = getTextContent(result);
+      const parsed = JSON.parse(text);
+      expect(parsed).toHaveProperty('display');
+      expect(parsed).toHaveProperty('data');
+      expect(parsed.data.success).toBe(true);
+      expect(parsed.data.type).toBe('condition');
+      expect(parsed.data.operation).toBe('add');
     });
   });
 

@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { handleToolCall } from '../../src/registry.js';
-import { getTextContent } from '../helpers.js';
+import { getTextContent, parseToolResponse } from '../helpers.js';
 
 describe('roll_dice (batch mode)', () => {
   describe('Basic Batch Rolling', () => {
@@ -17,13 +17,15 @@ describe('roll_dice (batch mode)', () => {
         ]
       });
 
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('╔'); // ASCII box border
-      expect(text).toContain('ROLLING 2 DICE EXPRESSIONS');
-      expect(text).toContain('Attack:');
-      expect(text).toContain('Damage:');
-      expect(text).toContain('TOTAL ACROSS ALL ROLLS:');
+      expect(response.data.success).toBe(true);
+      expect(response.data.type).toBe('batch_roll');
+      expect(response.data.results).toHaveLength(2);
+      expect(response.display).toContain('Batch Roll');
+      expect(response.display).toContain('Attack');
+      expect(response.display).toContain('Damage');
+      expect(response.display).toContain('**Grand Total:**');
     });
 
     it('should handle rolls without labels', async () => {
@@ -34,10 +36,13 @@ describe('roll_dice (batch mode)', () => {
         ]
       });
 
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('Roll 1:');
-      expect(text).toContain('Roll 2:');
+      expect(response.data.success).toBe(true);
+      expect(response.data.type).toBe('batch_roll');
+      expect(response.data.results).toHaveLength(2);
+      expect(response.display).toContain('Roll 1');
+      expect(response.display).toContain('Roll 2');
     });
 
     it('should include reason when provided', async () => {
@@ -46,8 +51,9 @@ describe('roll_dice (batch mode)', () => {
         reason: 'Multiattack'
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('MULTIATTACK');
+      const response = parseToolResponse(result);
+      expect(response.data.success).toBe(true);
+      expect(response.display).toContain('Multiattack');
     });
   });
 
@@ -60,10 +66,12 @@ describe('roll_dice (batch mode)', () => {
         ]
       });
 
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('2d20kh1+5'); // First roll has advantage
-      expect(text).toContain('1d20+5'); // Second roll doesn't
+      expect(response.data.success).toBe(true);
+      expect(response.data.type).toBe('batch_roll');
+      expect(response.data.results[0].expression).toBe('2d20kh1+5'); // First roll has advantage
+      expect(response.data.results[1].expression).toBe('1d20+5'); // Second roll doesn't
     });
 
     it('should support disadvantage in batch rolls', async () => {
@@ -73,9 +81,10 @@ describe('roll_dice (batch mode)', () => {
         ]
       });
 
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('2d20kl1');
+      expect(response.data.success).toBe(true);
+      expect(response.data.results[0].expression).toBe('2d20kl1');
     });
   });
 
@@ -89,12 +98,16 @@ describe('roll_dice (batch mode)', () => {
         ]
       });
 
-      const text = getTextContent(result);
-      const totalMatch = text.match(/TOTAL ACROSS ALL ROLLS: (\d+)/);
-      expect(totalMatch).not.toBeNull();
-      const total = parseInt(totalMatch![1]);
-      expect(total).toBeGreaterThanOrEqual(3); // 1+1+1
-      expect(total).toBeLessThanOrEqual(12);   // 4+4+4
+      const response = parseToolResponse(result);
+      expect(response.data.success).toBe(true);
+      expect(response.data.type).toBe('batch_roll');
+      const grandTotal = response.data.grandTotal;
+      expect(grandTotal).toBeGreaterThanOrEqual(3); // 1+1+1
+      expect(grandTotal).toBeLessThanOrEqual(12);   // 4+4+4
+      
+      // Verify grand total matches sum of results
+      const calculatedTotal = response.data.results.reduce((sum: number, r: any) => sum + r.total, 0);
+      expect(grandTotal).toBe(calculatedTotal);
     });
   });
 

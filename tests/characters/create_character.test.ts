@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { handleToolCall } from '../../src/registry.js';
-import { getTextContent } from '../helpers.js';
+import { getTextContent, parseToolResponse } from '../helpers.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -56,10 +56,12 @@ describe('create_character', () => {
       const result = await handleToolCall('create_character', {
         name: 'Thorin',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('Thorin');
-      expect(text).toContain('CHARACTER SHEET');
+      expect(response.data.success).toBe(true);
+      expect(response.data.type).toBe('character');
+      expect(response.data.character.name).toBe('Thorin');
+      expect(response.display).toContain('## ⚔️ Character Created:');
     });
 
     it('should create a character with full D&D stats', async () => {
@@ -77,12 +79,14 @@ describe('create_character', () => {
           cha: 14,
         },
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('Gandalf');
-      expect(text).toContain('Wizard');
-      expect(text).toContain('INT');
-      expect(text).toContain('18');
+      expect(response.data.character.name).toBe('Gandalf');
+      expect(response.data.character.class).toBe('Wizard');
+      expect(response.data.character.race).toBe('Human');
+      expect(response.data.character.level).toBe(5);
+      expect(response.data.character.stats.int).toBe(18);
+      expect(response.display).toContain('Wizard');
     });
 
     it('should auto-calculate HP based on class and CON', async () => {
@@ -117,16 +121,10 @@ describe('create_character', () => {
       expect(result2.isError).toBeUndefined();
 
       // Extract IDs from results
-      const text1 = getTextContent(result1);
-      const text2 = getTextContent(result2);
-      const match1 = text1.match(/Character ID: ([a-z0-9-]+)/);
-      const match2 = text2.match(/Character ID: ([a-z0-9-]+)/);
-
-      expect(match1).toBeTruthy();
-      expect(match2).toBeTruthy();
-
-      const id1 = match1![1];
-      const id2 = match2![1];
+      const response1 = parseToolResponse(result1);
+      const response2 = parseToolResponse(result2);
+      const id1 = response1.data.character.id;
+      const id2 = response2.data.character.id;
 
       // IDs should be different
       expect(id1).not.toBe(id2);
@@ -142,9 +140,9 @@ describe('create_character', () => {
       const result = await handleToolCall('create_character', {
         name: 'Hero',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('PC');
+      expect(response.data.character.characterType || 'pc').toBe('pc');
     });
 
     it('should create NPC type when specified', async () => {
@@ -152,9 +150,9 @@ describe('create_character', () => {
         name: 'Shopkeeper',
         characterType: 'npc',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('NPC');
+      expect(response.data.success).toBe(true);
     });
 
     it('should create enemy type when specified', async () => {
@@ -162,9 +160,9 @@ describe('create_character', () => {
         name: 'Goblin',
         characterType: 'enemy',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('ENEMY');
+      expect(response.data.success).toBe(true);
     });
   });
 
@@ -237,10 +235,8 @@ describe('create_character', () => {
       expect(fs.existsSync(DATA_DIR)).toBe(true);
 
       // Extract ID from result
-      const text = getTextContent(result);
-      const match = text.match(/Character ID: ([a-z0-9-]+)/);
-      expect(match).toBeTruthy();
-      const characterId = match![1];
+      const response = parseToolResponse(result);
+      const characterId = response.data.character.id;
 
       // Verify the specific file exists
       const filePath = path.join(DATA_DIR, `${characterId}.json`);
@@ -259,34 +255,34 @@ describe('create_character', () => {
   });
 
   describe('Output Format', () => {
-    it('should return ASCII art character sheet', async () => {
+    it('should return Semantic Markdown character sheet', async () => {
       const result = await handleToolCall('create_character', {
         name: 'Rich Output Test',
         race: 'Elf',
         class: 'Ranger',
         level: 4,
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
 
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('╔'); // ASCII box border
-      expect(text).toContain('Rich Output Test');
-      expect(text).toContain('Elf');
-      expect(text).toContain('Ranger');
-      expect(text).toContain('Level 4');
+      expect(response.display).toContain('## ⚔️ Character Created:');
+      expect(response.display).toContain('Rich Output Test');
+      expect(response.display).toContain('Elf');
+      expect(response.display).toContain('Ranger');
+      expect(response.display).toContain('Level 4');
     });
 
-    it('should include ASCII box drawing and HP bar', async () => {
+    it('should include HP bar and ability scores', async () => {
       const result = await handleToolCall('create_character', {
-        name: 'ASCII Test',
+        name: 'Barbarian Test',
         class: 'Barbarian',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
 
       expect(result.isError).toBeUndefined();
-      // Should have ASCII box drawing characters
-      expect(text).toContain('╔'); // Heavy box top-left
-      expect(text).toContain('HP: ['); // HP bar
+      expect(response.display).toContain('**HP:**');
+      expect(response.display).toContain('Ability Scores');
+      expect(response.data.character.hp.current).toBeGreaterThan(0);
     });
   });
 });

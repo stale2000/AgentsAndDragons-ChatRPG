@@ -5,8 +5,9 @@
 
 import { z } from 'zod';
 import { PositionSchema } from '../types.js';
-import { createBox, centerText, drawPath, BOX } from './ascii-art.js';
+import { drawPath } from './ascii-art.js';
 import { getEncounterParticipant } from './combat.js';
+import { ToolResponse, toResponse } from './markdown-format.js';
 
 // ============================================================
 // MEASURE DISTANCE
@@ -136,7 +137,7 @@ export function measureDistance(input: MeasureDistanceInput): MeasureDistanceRes
 }
 
 /**
- * Format distance result as ASCII diagram
+ * Format distance result as Semantic Markdown with ToolResponse
  */
 function formatDistanceResult(params: {
   from: { x: number; y: number; z: number };
@@ -151,55 +152,63 @@ function formatDistanceResult(params: {
   dy: number;
   dz: number;
 }): string {
-  const content: string[] = [];
-  const box = BOX.LIGHT;
+  const display: string[] = [];
 
-  // Title
-  const modeNames = {
+  // Mode names
+  const modeNames: Record<string, string> = {
     'euclidean': 'Euclidean (True Distance)',
     'grid_5e': 'Grid 5e (Simplified)',
     'grid_alt': 'Grid Alternate (5/10 Diagonal)',
   };
-  content.push('DISTANCE MEASUREMENT');
-  content.push(modeNames[params.mode as keyof typeof modeNames]);
-  content.push('');
-  content.push('─'.repeat(40));
-  content.push('');
 
-  // Positions
-  content.push('FROM → TO');
-  let positionDisplay = `(${params.from.x}, ${params.from.y}, ${params.from.z}) → (${params.to.x}, ${params.to.y}, ${params.to.z})`;
-  if (params.fromName || params.toName) {
-    const fromLabel = params.fromName || `(${params.from.x}, ${params.from.y}, ${params.from.z})`;
-    const toLabel = params.toName || `(${params.to.x}, ${params.to.y}, ${params.to.z})`;
-    positionDisplay = `${fromLabel} → ${toLabel}`;
-  }
-  content.push(positionDisplay);
-  content.push('');
+  display.push(`## 📏 Distance: ${params.distanceFeet}ft`);
+  display.push('');
 
-  // Visual path representation
-  const arrow = drawPath(params.from, params.to);
-  content.push(`Path: ${arrow}`);
-  content.push('');
+  // From/To
+  const fromLabel = params.fromName || `(${params.from.x}, ${params.from.y}, ${params.from.z})`;
+  const toLabel = params.toName || `(${params.to.x}, ${params.to.y}, ${params.to.z})`;
+  display.push(`**${fromLabel}** → **${toLabel}**`);
+  display.push('');
+
+  // Details
+  display.push(`**Mode:** ${modeNames[params.mode] || params.mode}`);
+  display.push(`**Squares:** ${params.distanceSquares} (@ 5ft each)`);
 
   // Movement breakdown
   if (params.dx > 0 || params.dy > 0 || params.dz > 0) {
-    content.push(`Movement: ${params.dx}x, ${params.dy}y, ${params.dz}z`);
-    content.push('');
+    display.push(`**Movement:** ${params.dx}x, ${params.dy}y, ${params.dz}z`);
   }
-
-  content.push('─'.repeat(40));
-  content.push('');
-
-  // Result
-  content.push(`DISTANCE: ${params.distanceFeet} feet`);
-  content.push(`(${params.distanceSquares} squares @ 5ft each)`);
 
   // Notes
   if (!params.includeElevation && params.to.z !== params.from.z) {
-    content.push('');
-    content.push('* Elevation difference ignored *');
+    display.push('');
+    display.push('*Elevation difference ignored*');
   }
 
-  return createBox('DISTANCE', content, undefined, 'HEAVY');
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'distance',
+      distanceFeet: params.distanceFeet,
+      distanceSquares: params.distanceSquares,
+      mode: params.mode,
+      from: {
+        position: params.from,
+        name: params.fromName,
+      },
+      to: {
+        position: params.to,
+        name: params.toName,
+      },
+      movement: {
+        dx: params.dx,
+        dy: params.dy,
+        dz: params.dz,
+      },
+      includeElevation: params.includeElevation,
+    },
+  };
+
+  return toResponse(response);
 }

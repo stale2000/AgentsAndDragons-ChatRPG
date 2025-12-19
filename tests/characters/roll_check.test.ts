@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { handleToolCall } from '../../src/registry.js';
-import { getTextContent } from '../helpers.js';
+import { getTextContent, parseToolResponse } from '../helpers.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -56,9 +56,8 @@ describe('roll_check', () => {
       saveProficiencies: ['dex', 'int'],
     });
 
-    const text1 = getTextContent(result1);
-    const match1 = text1.match(/Character ID: ([a-z0-9-]+)/);
-    testCharacterId = match1![1];
+    const response1 = parseToolResponse(result1);
+    testCharacterId = response1.data.character.id;
 
     // Create character for contested checks
     const result2 = await handleToolCall('create_character', {
@@ -77,9 +76,8 @@ describe('roll_check', () => {
       saveProficiencies: ['str', 'con'],
     });
 
-    const text2 = getTextContent(result2);
-    const match2 = text2.match(/Character ID: ([a-z0-9-]+)/);
-    proficientCharacterId = match2![1];
+    const response2 = parseToolResponse(result2);
+    proficientCharacterId = response2.data.character.id;
   });
 
   afterAll(() => {
@@ -317,10 +315,13 @@ describe('roll_check', () => {
         bonus: 20, // Ensure we pass
         dc: 10,
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('DC 10');
-      expect(text).toMatch(/Success|Pass|✓/i);
+      expect(response.display).toContain('DC');
+      expect(response.display).toContain('10');
+      expect(response.display).toMatch(/Success|Pass|✓|✅/i);
+      expect(response.data.dc).toBe(10);
+      expect(response.data.passed).toBe(true);
     });
 
     it('should return failure when total < DC', async () => {
@@ -330,10 +331,13 @@ describe('roll_check', () => {
         bonus: -10, // Ensure we fail
         dc: 20,
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('DC 20');
-      expect(text).toMatch(/Fail|✗|Miss/i);
+      expect(response.display).toContain('DC');
+      expect(response.display).toContain('20');
+      expect(response.display).toMatch(/Fail|✗|Miss|❌/i);
+      expect(response.data.dc).toBe(20);
+      expect(response.data.passed).toBe(false);
     });
 
     it('should show DC value prominently in output', async () => {
@@ -343,10 +347,11 @@ describe('roll_check', () => {
         skill: 'perception',
         dc: 15,
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('15'); // DC value
-      expect(text).toContain('Perception');
+      expect(response.display).toContain('15'); // DC value
+      expect(response.display).toContain('Perception');
+      expect(response.data.dc).toBe(15);
     });
 
     it('should handle edge case where total exactly equals DC (success)', async () => {
@@ -356,9 +361,11 @@ describe('roll_check', () => {
         bonus: 5,
         dc: 15, // If roll is 10, total = 15 = DC (should succeed)
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('DC 15');
+      expect(response.display).toContain('DC');
+      expect(response.display).toContain('15');
+      expect(response.data.dc).toBe(15);
     });
 
     it('should treat natural 20 as automatic success for saving throw', async () => {
@@ -552,17 +559,19 @@ describe('roll_check', () => {
     });
   });
 
-  describe('ASCII Art Output', () => {
-    it('should use box drawing characters for output', async () => {
+  describe('Semantic Markdown Output', () => {
+    it('should return valid ToolResponse JSON', async () => {
       const result = await handleToolCall('roll_check', {
         characterId: testCharacterId,
         checkType: 'skill',
         skill: 'perception',
         dc: 15,
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toMatch(/[╔╗╚╝═║]/); // ASCII box characters
+      expect(response).toHaveProperty('display');
+      expect(response).toHaveProperty('data');
+      expect(response.data.type).toBe('check');
     });
 
     it('should show roll type prominently', async () => {
@@ -571,9 +580,10 @@ describe('roll_check', () => {
         checkType: 'save',
         ability: 'dex',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('SAVE');
+      expect(response.display).toContain('Save');
+      expect(response.display).toContain('DEX');
     });
 
     it('should show modifier breakdown', async () => {
@@ -582,11 +592,11 @@ describe('roll_check', () => {
         checkType: 'skill',
         skill: 'stealth', // +3 DEX + +2 proficiency = +5
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      // Should show breakdown like "1d20 + 3 (DEX) + 2 (Prof)"
-      expect(text).toContain('+3');
-      expect(text).toContain('+2');
+      // Should show breakdown
+      expect(response.display).toContain('+3');
+      expect(response.display).toContain('+2');
     });
 
     it('should show dice rolled clearly', async () => {
@@ -600,15 +610,16 @@ describe('roll_check', () => {
       expect(text).toMatch(/\d+/); // Should contain dice values
     });
 
-    it('should show total prominently', async () => {
+    it('should show total in display', async () => {
       const result = await handleToolCall('roll_check', {
         characterId: testCharacterId,
         checkType: 'skill',
         skill: 'sleight_of_hand',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toMatch(/Total:?\s*\d+/i);
+      expect(response.data.total).toBeGreaterThanOrEqual(1);
+      expect(response.display).toMatch(/\[\d+\]|\*\*\d+\*\*/);
     });
 
     it('should show DC result clearly when DC provided', async () => {
@@ -618,10 +629,10 @@ describe('roll_check', () => {
         skill: 'acrobatics',
         dc: 12,
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('DC 12');
-      expect(text).toMatch(/Success|Failure|✓|✗/);
+      expect(response.display).toContain('12');
+      expect(response.display).toMatch(/Success|Failure|✓|✗/);
     });
   });
 

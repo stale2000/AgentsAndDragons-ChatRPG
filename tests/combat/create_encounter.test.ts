@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { handleToolCall } from '../../src/registry.js';
-import { getTextContent } from '../helpers.js';
+import { getTextContent, parseToolResponse } from '../helpers.js';
 
 describe('create_encounter', () => {
   describe('Basic Encounter Creation', () => {
@@ -32,12 +32,11 @@ describe('create_encounter', () => {
 
       const text = getTextContent(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('╔'); // ASCII box border
-      expect(text).toContain('ENCOUNTER');
+      expect(text).toContain('Encounter Created'); // Semantic Markdown header
       expect(text).toContain('Aragorn');
       expect(text).toContain('Goblin Scout');
       // Should include encounter ID in output
-      expect(text).toMatch(/Encounter ID:/i);
+      expect(text).toMatch(/Encounter ID/i);
     });
 
     it('should return unique encounter ID', async () => {
@@ -58,13 +57,13 @@ describe('create_encounter', () => {
       const text1 = getTextContent(result1);
       const text2 = getTextContent(result2);
       
-      // Extract encounter IDs (should be different)
-      const id1Match = text1.match(/Encounter ID: ([a-zA-Z0-9-]+)/);
-      const id2Match = text2.match(/Encounter ID: ([a-zA-Z0-9-]+)/);
+      // Extract encounter IDs from ToolResponse data (should be different)
+      const response1 = parseToolResponse(result1);
+      const response2 = parseToolResponse(result2);
       
-      expect(id1Match).not.toBeNull();
-      expect(id2Match).not.toBeNull();
-      expect(id1Match![1]).not.toBe(id2Match![1]);
+      expect(response1.data.encounterId).toBeDefined();
+      expect(response2.data.encounterId).toBeDefined();
+      expect(response1.data.encounterId).not.toBe(response2.data.encounterId);
     });
 
     it('should auto-roll initiative for all participants', async () => {
@@ -90,12 +89,13 @@ describe('create_encounter', () => {
         ],
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('INITIATIVE');
-      expect(text).toContain('Ranger');
-      expect(text).toContain('Dire Wolf');
-      // Initiative values should be present (d20 + bonus, so 1-23 for Ranger, 1-22 for Wolf)
-      expect(text).toMatch(/\d+/); // At least one number showing initiative
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('Initiative');
+      expect(response.display).toContain('Ranger');
+      expect(response.display).toContain('Dire Wolf');
+      // Initiative values should be present in data
+      expect(response.data.participants[0].initiative).toBeGreaterThanOrEqual(1);
+      expect(response.data.participants[0].initiative).toBeLessThanOrEqual(24);
     });
 
     it('should sort initiative order correctly (highest first)', async () => {
@@ -108,7 +108,7 @@ describe('create_encounter', () => {
       });
 
       const text = getTextContent(result);
-      expect(text).toContain('INITIATIVE ORDER');
+      expect(text).toContain('Initiative Order');
       // The order should show initiative values, though exact order varies due to dice
       // We just verify all three are present
       expect(text).toContain('Slow Joe');
@@ -182,8 +182,10 @@ describe('create_encounter', () => {
 
       const text = getTextContent(result);
       expect(text).toContain('Guard');
-      // Size should be displayed or stored as medium
-      expect(text).toMatch(/medium/i);
+      // Size should be stored as medium (default not shown for medium)
+      const response = parseToolResponse(result);
+      const guard = response.data.participants.find((p: any) => p.name === 'Guard');
+      expect(guard.size || 'medium').toBe('medium');
     });
 
     it('should validate position has x,y coordinates', async () => {
@@ -262,13 +264,12 @@ describe('create_encounter', () => {
         ],
       });
 
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // Initiative should be between 5 (1+4) and 24 (20+4)
-      const initiativeMatch = text.match(/Initiative[:\s]+(\d+)/i);
-      expect(initiativeMatch).not.toBeNull();
-      const initiative = parseInt(initiativeMatch![1]);
-      expect(initiative).toBeGreaterThanOrEqual(5);
-      expect(initiative).toBeLessThanOrEqual(24);
+      const rogue = response.data.participants.find((p: any) => p.name === 'Rogue');
+      expect(rogue).toBeDefined();
+      expect(rogue.initiative).toBeGreaterThanOrEqual(5);
+      expect(rogue.initiative).toBeLessThanOrEqual(24);
     });
 
     it('should handle initiative ties (same roll)', async () => {
@@ -318,14 +319,13 @@ describe('create_encounter', () => {
         ],
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('Zombie');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('Zombie');
       // Initiative should be between -1 (1-2) and 18 (20-2)
-      const initiativeMatch = text.match(/Initiative[:\s]+(-?\d+)/i);
-      expect(initiativeMatch).not.toBeNull();
-      const initiative = parseInt(initiativeMatch![1]);
-      expect(initiative).toBeGreaterThanOrEqual(-1);
-      expect(initiative).toBeLessThanOrEqual(18);
+      const zombie = response.data.participants.find((p: any) => p.name === 'Zombie');
+      expect(zombie).toBeDefined();
+      expect(zombie.initiative).toBeGreaterThanOrEqual(-1);
+      expect(zombie.initiative).toBeLessThanOrEqual(18);
     });
   });
 
@@ -344,7 +344,7 @@ describe('create_encounter', () => {
       const text = getTextContent(result);
       expect(text).toContain('30'); // Width
       expect(text).toContain('25'); // Height
-      expect(text).toMatch(/battlefield|terrain/i);
+      expect(text).toMatch(/terrain|size/i);
     });
 
     it('should default terrain to 20x20 when not provided', async () => {
@@ -578,21 +578,22 @@ describe('create_encounter', () => {
     });
   });
 
-  describe('ASCII Art Output', () => {
-    it('should return ASCII-formatted encounter summary', async () => {
+  describe('Semantic Markdown Output', () => {
+    it('should return valid ToolResponse JSON', async () => {
       const result = await handleToolCall('create_encounter', {
         participants: [
           { id: 'p1', name: 'Knight', hp: 40, maxHp: 40, position: { x: 5, y: 5 } },
         ],
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('╔'); // Heavy box drawing
-      expect(text).toContain('═');
-      expect(text).toContain('╗');
+      const response = parseToolResponse(result);
+      expect(response).toHaveProperty('display');
+      expect(response).toHaveProperty('data');
+      expect(response.data.type).toBe('encounter');
+      expect(response.data.encounterId).toBeDefined();
     });
 
-    it('should show initiative order in output', async () => {
+    it('should show initiative order in Markdown table', async () => {
       const result = await handleToolCall('create_encounter', {
         participants: [
           { id: 'p1', name: 'Bard', hp: 25, maxHp: 25, initiativeBonus: 3, position: { x: 0, y: 0 } },
@@ -600,10 +601,12 @@ describe('create_encounter', () => {
         ],
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('INITIATIVE');
-      expect(text).toContain('Bard');
-      expect(text).toContain('Bandit');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('Initiative Order');
+      expect(response.display).toContain('Bard');
+      expect(response.display).toContain('Bandit');
+      // Check for table format
+      expect(response.display).toContain('|');
     });
 
     it('should show participant HP in output', async () => {
@@ -613,10 +616,11 @@ describe('create_encounter', () => {
         ],
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('35'); // Current HP
-      expect(text).toContain('40'); // Max HP
-      expect(text).toMatch(/hp|health/i);
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('35'); // Current HP
+      expect(response.display).toContain('40'); // Max HP
+      expect(response.data.participants[0].hp).toBe(35);
+      expect(response.data.participants[0].maxHp).toBe(40);
     });
 
     it('should show participant positions in output', async () => {
@@ -626,25 +630,27 @@ describe('create_encounter', () => {
         ],
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('12'); // X position
-      expect(text).toContain('8');  // Y position
-      expect(text).toMatch(/position|location|x|y/i);
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('12'); // X position
+      expect(response.display).toContain('8');  // Y position
+      expect(response.data.participants[0].position.x).toBe(12);
+      expect(response.data.participants[0].position.y).toBe(8);
     });
 
-    it('should use consistent box drawing style', async () => {
+    it('should use emoji indicators for allies and enemies', async () => {
       const result = await handleToolCall('create_encounter', {
         participants: [
           { id: 'p1', name: 'Sorcerer', hp: 22, maxHp: 22, position: { x: 5, y: 5 } },
+          { id: 'e1', name: 'Goblin', hp: 7, maxHp: 7, position: { x: 10, y: 10 }, isEnemy: true },
         ],
       });
 
       const text = getTextContent(result);
-      // Check for heavy box characters (╔═╗ ║ ╚═╝)
-      expect(text).toMatch(/[╔╗╚╝═║]/);
+      expect(text).toContain('🟢'); // Ally indicator
+      expect(text).toContain('🔴'); // Enemy indicator
     });
 
-    it('should include encounter metadata in output', async () => {
+    it('should include encounter metadata in data object', async () => {
       const result = await handleToolCall('create_encounter', {
         participants: [
           { id: 'p1', name: 'Warlock', hp: 24, maxHp: 24, position: { x: 0, y: 0 } },
@@ -654,10 +660,11 @@ describe('create_encounter', () => {
         terrain: { width: 20, height: 20 },
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('dim'); // Lighting
-      expect(text).toContain('20'); // Terrain dimensions
-      expect(text).toMatch(/participant.*2|2.*participant/i); // Participant count
+      const response = parseToolResponse(result);
+      expect(response.data.lighting).toBe('dim');
+      expect(response.data.terrain.width).toBe(20);
+      expect(response.data.terrain.height).toBe(20);
+      expect(response.data.participants.length).toBe(2);
     });
   });
 

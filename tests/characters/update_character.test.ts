@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { handleToolCall } from '../../src/registry.js';
-import { getTextContent } from '../helpers.js';
+import { getTextContent, parseToolResponse } from '../helpers.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -40,9 +40,8 @@ describe('update_character', () => {
       speed: 30,
     });
 
-    const text = getTextContent(result);
-    const match = text.match(/Character ID: ([a-z0-9-]+)/);
-    testCharacterId = match![1];
+    const response = parseToolResponse(result);
+    testCharacterId = response.data.character.id;
   });
 
   describe('Basic Updates', () => {
@@ -52,14 +51,15 @@ describe('update_character', () => {
         hp: 25,
       });
 
-      const text = getTextContent(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('╔'); // ASCII box border
-      expect(text).toContain('CHARACTER UPDATE');
-      expect(text).toContain('CHANGES');
-      expect(text).toContain('HP:');
-      expect(text).toContain('25');
-      expect(text).toContain('→'); // Arrow showing before → after
+      const response = parseToolResponse(result);
+      expect(response.data.success).toBe(true);
+      expect(response.data.type).toBe('update');
+      expect(response.display).toContain('## 📋 Update:');
+      expect(response.display).toContain('### Changes');
+      expect(response.display).toContain('**HP:**');
+      expect(response.display).toContain('25');
+      expect(response.display).toContain('→'); // Arrow showing before → after
     });
 
     it('should update character level', async () => {
@@ -68,13 +68,13 @@ describe('update_character', () => {
         level: 6,
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('Level:');
-      expect(text).toContain('5'); // Before
-      expect(text).toContain('6'); // After
-      expect(text).toContain('→'); // Arrow format
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('**Level:**');
+      expect(response.display).toContain('5'); // Before
+      expect(response.display).toContain('6'); // After
+      expect(response.display).toContain('→'); // Arrow format
       // Max HP should increase due to level up
-      expect(text).toContain('Max HP:');
+      expect(response.display).toContain('**Max HP:**');
     });
 
     it('should update character name', async () => {
@@ -83,9 +83,9 @@ describe('update_character', () => {
         name: 'Updated Hero',
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('Test Hero'); // Before
-      expect(text).toContain('Updated Hero'); // After
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('Test Hero'); // Before
+      expect(response.display).toContain('Updated Hero'); // After
     });
 
     it('should update AC', async () => {
@@ -94,10 +94,10 @@ describe('update_character', () => {
         ac: 20,
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('AC:');
-      expect(text).toContain('18'); // Before
-      expect(text).toContain('20'); // After
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('**AC:**');
+      expect(response.display).toContain('18'); // Before
+      expect(response.display).toContain('20'); // After
     });
   });
 
@@ -108,13 +108,13 @@ describe('update_character', () => {
         stats: { str: 18 },
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('STR');
-      expect(text).toContain('16'); // Before
-      expect(text).toContain('18'); // After
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('STR');
+      expect(response.display).toContain('16'); // Before
+      expect(response.display).toContain('18'); // After
       // Modifier should change from +3 to +4
-      expect(text).toContain('+3');
-      expect(text).toContain('+4');
+      expect(response.display).toContain('+3');
+      expect(response.display).toContain('+4');
     });
 
     it('should update multiple ability scores', async () => {
@@ -123,10 +123,10 @@ describe('update_character', () => {
         stats: { str: 18, dex: 16, con: 16 },
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('STR');
-      expect(text).toContain('DEX');
-      expect(text).toContain('CON');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('STR');
+      expect(response.display).toContain('DEX');
+      expect(response.display).toContain('CON');
     });
 
     it('should recalculate maxHp when CON changes', async () => {
@@ -135,9 +135,9 @@ describe('update_character', () => {
         stats: { con: 18 }, // +4 instead of +2, should add +10 HP (2 * 5 levels)
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('CON');
-      expect(text).toContain('Max HP:');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('CON');
+      expect(response.display).toContain('Max HP:');
       // Should show increased maxHp
     });
   });
@@ -152,11 +152,11 @@ describe('update_character', () => {
         level: 6,
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('HP:');
-      expect(text).toContain('AC:');
-      expect(text).toContain('Speed:');
-      expect(text).toContain('Level:');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('HP:');
+      expect(response.display).toContain('AC:');
+      expect(response.display).toContain('Speed:');
+      expect(response.display).toContain('Level:');
     });
 
     it('should update class and recalculate derived stats', async () => {
@@ -165,10 +165,10 @@ describe('update_character', () => {
         class: 'Wizard', // Lower hit die (d6 vs d10)
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('Fighter'); // Before
-      expect(text).toContain('Wizard'); // After
-      expect(text).toContain('Max HP:'); // Should recalculate
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('Fighter'); // Before
+      expect(response.display).toContain('Wizard'); // After
+      expect(response.display).toContain('Max HP:'); // Should recalculate
     });
   });
 
@@ -179,10 +179,10 @@ describe('update_character', () => {
         equipment: ['Longsword', 'Shield', 'Plate Armor'],
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('Equipment:');
-      expect(text).toContain('Longsword');
-      expect(text).toContain('Shield');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('Equipment:');
+      expect(response.display).toContain('Longsword');
+      expect(response.display).toContain('Shield');
     });
 
     it('should update spellcasting info', async () => {
@@ -193,9 +193,9 @@ describe('update_character', () => {
         knownSpells: ['Magic Missile', 'Shield'],
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('Spellcasting:');
-      expect(text).toContain('INT');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('Spellcasting Ability');
+      expect(response.display).toContain('INT');
     });
 
     it('should update resistances/immunities', async () => {
@@ -205,23 +205,22 @@ describe('update_character', () => {
         immunities: ['poison'],
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('Resistances:');
-      expect(text).toContain('fire');
-      expect(text).toContain('Immunities:');
-      expect(text).toContain('poison');
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('Resistances:');
+      expect(response.display).toContain('fire');
+      expect(response.display).toContain('Immunities:');
+      expect(response.display).toContain('poison');
     });
   });
 
   describe('Validation', () => {
     it('should reject HP greater than maxHp', async () => {
-      // First get current maxHp
+      // First get current maxHp from JSON data
       const getResult = await handleToolCall('get_character', {
         characterId: testCharacterId,
       });
-      const getText = getTextContent(getResult);
-      const hpMatch = getText.match(/HP: \[.*?\] (\d+)\/(\d+)/);
-      const maxHp = parseInt(hpMatch![2]);
+      const getResponse = parseToolResponse(getResult);
+      const maxHp = getResponse.data.character.hp.max;
 
       const result = await handleToolCall('update_character', {
         characterId: testCharacterId,
@@ -235,13 +234,12 @@ describe('update_character', () => {
     });
 
     it('should treat negative numbers as damage deltas', async () => {
-      // Get initial HP
+      // Get initial HP from JSON data
       const getResult = await handleToolCall('get_character', {
         characterId: testCharacterId,
       });
-      const getText = getTextContent(getResult);
-      const hpMatch = getText.match(/HP: \[.*?\] (\d+)\/(\d+)/);
-      const initialHp = parseInt(hpMatch![1]);
+      const getResponse = parseToolResponse(getResult);
+      const initialHp = getResponse.data.character.hp.current;
 
       // Apply damage using negative number (delta)
       const result = await handleToolCall('update_character', {
@@ -250,11 +248,10 @@ describe('update_character', () => {
       });
 
       expect(result.isError).toBeUndefined(); // Should succeed (delta notation)
-      const text = getTextContent(result);
-      expect(text).toContain('HP:');
-      // HP should be reduced by 5
-      const afterMatch = text.match(/HP:.*?→.*?(\d+)\/(\d+)/);
-      expect(parseInt(afterMatch![1])).toBe(initialHp - 5);
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('**HP:**');
+      // HP should be reduced by 5 - check the data structure
+      expect(response.data.character.hp.current).toBe(initialHp - 5);
     });
 
     it('should reject level out of range', async () => {
@@ -317,25 +314,28 @@ describe('update_character', () => {
         characterId: testCharacterId,
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('22'); // Updated AC
+      const response = parseToolResponse(result);
+      expect(response.display).toContain('22'); // Updated AC
     });
   });
 
   describe('Output Format', () => {
-    it('should show before/after comparison in ASCII', async () => {
+    it('should return ToolResponse JSON with display and data fields', async () => {
       const result = await handleToolCall('update_character', {
         characterId: testCharacterId,
         hp: 35,
         level: 6,
       });
 
-      const text = getTextContent(result);
-      expect(text).toContain('╔'); // ASCII box border
-      expect(text).toContain('CHARACTER UPDATE');
-      expect(text).toContain('CHANGES');
-      expect(text).toContain('→'); // Arrow showing changes
-      expect(text).toContain('║'); // Box border (HEAVY style)
+      const response = parseToolResponse(result);
+      expect(response.display).toBeDefined();
+      expect(response.data).toBeDefined();
+      expect(response.data.success).toBe(true);
+      expect(response.data.type).toBe('update');
+      expect(response.data.changes).toBeDefined();
+      expect(response.display).toContain('## 📋 Update:');
+      expect(response.display).toContain('### Changes');
+      expect(response.display).toContain('→'); // Arrow showing changes
     });
 
     it('should only show changed fields in comparison', async () => {
@@ -344,30 +344,29 @@ describe('update_character', () => {
         hp: 20,
       });
 
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // Should show HP change
-      expect(text).toContain('HP:');
+      expect(response.display).toContain('HP:');
       // Should not clutter with unchanged fields (test by checking reasonable length)
-      expect(text.length).toBeLessThan(2000); // Compact output
+      expect(response.display.length).toBeLessThan(2000); // Compact output
     });
 
     it('should handle updates with no actual changes gracefully', async () => {
-      // Get current HP first
+      // Get current HP first from JSON data
       const getResult = await handleToolCall('get_character', {
         characterId: testCharacterId,
       });
-      const getText = getTextContent(getResult);
-      const hpMatch = getText.match(/HP: \[.*?\] (\d+)\/(\d+)/);
-      const currentHp = parseInt(hpMatch![1]);
+      const getResponse = parseToolResponse(getResult);
+      const currentHp = getResponse.data.character.hp.current;
 
       const result = await handleToolCall('update_character', {
         characterId: testCharacterId,
         hp: currentHp, // Same value
       });
 
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('CHARACTER UPDATE');
+      expect(response.display).toContain('## 📋 Update:');
     });
   });
 });

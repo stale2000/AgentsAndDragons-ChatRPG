@@ -11,14 +11,28 @@ A Model Context Protocol (MCP) server providing 50 core D&D 5e tools for AI Dung
 
 ## Quick Start
 
-### 1. Build the Server
+### 1. Clone the Repository
+
+```bash
+# Create a folder for the project
+mkdir rpg-lite-mcp
+cd rpg-lite-mcp
+
+# Clone the GitHub repository
+git clone <repository-url> .
+
+# Open in VS Code (optional)
+code .
+```
+
+### 2. Build the Server
 
 ```bash
 npm install
 npm run build
 ```
 
-### 2. Test the Server
+### 3. Test the Server
 
 ```bash
 # Run the built-in test
@@ -29,7 +43,7 @@ npm start
 # (Server runs on stdio - send JSON-RPC messages)
 ```
 
-### 3. Register with Claude Desktop
+### 4. Register with Claude Desktop
 
 Add this configuration to your Claude Desktop config file:
 
@@ -40,19 +54,23 @@ Add this configuration to your Claude Desktop config file:
 ```json
 {
   "mcpServers": {
-    "rpg-lite": {
+    "rpg-lite-mcp": {
       "command": "node",
       "args": [
-        "C:\\Users\\mnehm\\AppData\\Roaming\\Roo-Code\\MCP\\rpg-lite-mcp\\dist\\index.js"
+        "/absolute/path/to/rpg-lite-mcp/dist/index.js"
       ]
     }
   }
 }
 ```
 
-**Important:** Replace the path with your actual installation directory!
+**Example paths:**
+- **Windows:** `"C:\\Users\\YourUsername\\rpg-lite-mcp\\dist\\index.js"`
+- **macOS/Linux:** `"/home/yourusername/rpg-lite-mcp/dist/index.js"`
 
-### 4. Restart Claude Desktop
+**Important:** Replace the path with your **actual absolute path** to the cloned repository!
+
+### 5. Restart Claude Desktop
 
 The server will auto-start when Claude Desktop launches.
 

@@ -10,6 +10,7 @@ import * as os from 'os';
 import { randomUUID } from 'crypto';
 import { ConditionSchema, AbilitySchema, PositionSchema, SizeSchema, DamageTypeSchema, LightSchema, type Condition, type Ability } from '../types.js';
 import { createBox, centerText, padText, BOX } from './ascii-art.js';
+import { ToolResponse, toResponse, formatConditionIcon } from './markdown-format.js';
 
 // Use AppData for persistent character storage (cross-session persistence)
 const getDataDir = () => {
@@ -449,75 +450,117 @@ function formatBatchResults(results: Array<{
   message: string;
   queryResult?: string;
 }>): string {
-  const content: string[] = [];
-
-  // Check if this is all query operations
+  const display: string[] = [];
   const allQueries = results.every(r => r.operation === 'query');
 
   if (allQueries && results.length > 0) {
-    // Special formatting for query batch - show full details
-    content.push(centerText(`CONDITION STATUS - ${results.length} CHARACTERS`, 68));
-    content.push('');
-    content.push('═'.repeat(68));
+    // Special formatting for query batch
+    display.push(`## 📋 Condition Status - ${results.length} Characters`);
+    display.push('');
 
     for (const result of results) {
-      content.push('');
       const displayName = result.targetName || result.targetId;
-      content.push(centerText(displayName.toUpperCase(), 68));
-      content.push('─'.repeat(68));
+      display.push(`### ${displayName}`);
+      display.push('');
 
       if (result.success && result.queryResult) {
-        // Extract just the condition details from the query result
-        // The query result is a full box, so we'll strip the outer box
-        const lines = result.queryResult.split('\n');
-        // Find lines that contain actual condition info (skip the box borders)
-        const relevantLines = lines.filter(line => {
-          return line.trim() && !line.match(/^[╔╗╚╝║═─┌┐└┘│]+$/) && !line.includes('CONDITION STATUS');
-        });
-
-        for (const line of relevantLines) {
-          content.push(line);
+        // Parse the JSON result to extract condition info
+        try {
+          const parsed = JSON.parse(result.queryResult);
+          if (parsed.display) {
+            // Extract the conditions part from the display
+            const lines = parsed.display.split('\n').filter((line: string) => 
+              line.trim() && !line.startsWith('##') && !line.startsWith('---') && !line.startsWith('*ID:')
+            );
+            display.push(lines.join('\n'));
+          }
+        } catch {
+          display.push('No active conditions');
         }
       } else if (!result.success) {
-        content.push(padText(`  Error: ${result.message}`, 68, 'left'));
+        display.push(`**Error:** ${result.message}`);
       } else {
-        content.push(padText(`  No active conditions`, 68, 'left'));
+        display.push('No active conditions');
       }
-      content.push('');
+      display.push('');
     }
 
-    content.push('═'.repeat(68));
-    return createBox('BATCH CONDITION QUERY', content, undefined, 'HEAVY');
+    const response: ToolResponse = {
+      display: display.join('\n'),
+      data: {
+        success: true,
+        type: 'condition',
+        operation: 'batch_query',
+        results: results.map(r => ({
+          targetId: r.targetId,
+          targetName: r.targetName,
+          success: r.success,
+          error: r.success ? undefined : r.message,
+        })),
+      },
+    };
+
+    return toResponse(response);
   }
 
-  // Standard batch operation formatting (add/remove/tick)
-  content.push(centerText(`PROCESSED ${results.length} OPERATIONS`, 68));
-  content.push('');
-  content.push('─'.repeat(68));
-  content.push('');
+  // Standard batch operation formatting with markdown table
+  display.push(`## 📋 Batch Condition Update`);
+  display.push('');
+  display.push(`| Target | Operation | Condition | Status |`);
+  display.push(`|--------|-----------|-----------|--------|`);
+
+  const changes: Array<{
+    targetId: string;
+    targetName: string | null;
+    operation: string;
+    condition: string;
+    success: boolean;
+    error?: string;
+  }> = [];
+
+  for (const result of results) {
+    const displayName = result.targetName || result.targetId;
+    const conditionName = result.condition 
+      ? `${formatConditionIcon(result.condition)} ${result.condition.charAt(0).toUpperCase() + result.condition.slice(1)}`
+      : '—';
+    const status = result.success ? '✅' : '❌';
+    const opTitle = result.operation.charAt(0).toUpperCase() + result.operation.slice(1);
+
+    display.push(`| ${displayName} | ${opTitle} | ${conditionName} | ${status} |`);
+
+    changes.push({
+      targetId: result.targetId,
+      targetName: result.targetName,
+      operation: result.operation,
+      condition: result.condition || '',
+      success: result.success,
+      error: result.success ? undefined : result.message,
+    });
+  }
 
   const successCount = results.filter(r => r.success).length;
   const failCount = results.length - successCount;
 
-  for (const result of results) {
-    const status = result.success ? '✓' : '✗';
-    const displayName = result.targetName || result.targetId;
-    const opDesc = result.condition
-      ? `${result.operation} ${result.condition}`
-      : result.operation;
+  display.push('');
+  display.push('---');
+  display.push(`**Summary:** ✅ ${successCount} succeeded | ❌ ${failCount} failed`);
 
-    content.push(padText(`${status} ${displayName}: ${opDesc}`, 68, 'left'));
-    if (!result.success) {
-      content.push(padText(`   Error: ${result.message}`, 68, 'left'));
-    }
-  }
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'condition',
+      operation: 'batch',
+      changes,
+      summary: {
+        total: results.length,
+        succeeded: successCount,
+        failed: failCount,
+      },
+    },
+  };
 
-  content.push('');
-  content.push('─'.repeat(68));
-  content.push('');
-  content.push(padText(`Success: ${successCount} | Failed: ${failCount}`, 68, 'left'));
-
-  return createBox('BATCH CONDITION UPDATE', content, undefined, 'HEAVY');
+  return toResponse(response);
 }
 
 // Helper for testing: clear all conditions
@@ -601,15 +644,39 @@ function handleAddExhaustion(
 
 function handleRemoveCondition(targetId: string, input: ManageConditionInput): string {
   const conditions = conditionStore.get(targetId) || [];
+  const targetName = getCharacterNameById(targetId);
+  const displayName = targetName || targetId;
 
   // Special handling for "all"
   if (input.condition === 'all' as any) {
+    const removedConditions = [...conditions];
     conditionStore.set(targetId, []);
-    const content: string[] = [];
-    content.push(centerText(`TARGET: ${targetId}`, 58));
-    content.push('');
-    content.push(centerText('All conditions removed', 58));
-    return createBox('CONDITIONS CLEARED', content, undefined, 'HEAVY');
+    
+    const display: string[] = [];
+    display.push(`## 🟢 All Conditions Cleared`);
+    display.push('');
+    display.push(`**${displayName}** - all conditions removed`);
+    if (removedConditions.length > 0) {
+      display.push('');
+      display.push('**Removed:**');
+      for (const c of removedConditions) {
+        const icon = formatConditionIcon(c.condition);
+        const name = c.condition.charAt(0).toUpperCase() + c.condition.slice(1);
+        display.push(`- ${icon} ${name}`);
+      }
+    }
+
+    const response: ToolResponse = {
+      display: display.join('\n'),
+      data: {
+        success: true,
+        type: 'condition',
+        operation: 'remove_all',
+        target: { id: targetId, name: displayName },
+        conditions: removedConditions.map(c => ({ condition: c.condition })),
+      },
+    };
+    return toResponse(response);
   }
 
   if (!input.condition) {
@@ -624,11 +691,25 @@ function handleRemoveCondition(targetId: string, input: ManageConditionInput): s
   const index = conditions.findIndex(c => c.condition === input.condition);
 
   if (index === -1) {
-    const content: string[] = [];
-    content.push(centerText(`TARGET: ${targetId}`, 58));
-    content.push('');
-    content.push(centerText(`Not affected by ${input.condition}`, 58));
-    return createBox('CONDITION NOT FOUND', content, undefined, 'HEAVY');
+    const icon = formatConditionIcon(input.condition);
+    const condName = input.condition.charAt(0).toUpperCase() + input.condition.slice(1);
+    
+    const display: string[] = [];
+    display.push(`## ⚠️ Condition Not Found`);
+    display.push('');
+    display.push(`**${displayName}** is not affected by **${icon} ${condName}**`);
+
+    const response: ToolResponse = {
+      display: display.join('\n'),
+      data: {
+        success: false,
+        type: 'condition',
+        operation: 'remove',
+        target: { id: targetId, name: displayName },
+        error: `Not affected by ${input.condition}`,
+      },
+    };
+    return toResponse(response);
   }
 
   const removed = conditions.splice(index, 1)[0];
@@ -643,13 +724,27 @@ function handleRemoveExhaustion(
   input: ManageConditionInput
 ): string {
   const existing = conditions.find(c => c.condition === 'exhaustion');
+  const targetName = getCharacterNameById(targetId);
+  const displayName = targetName || targetId;
+  const icon = formatConditionIcon('exhaustion');
 
   if (!existing) {
-    const content: string[] = [];
-    content.push(centerText(`TARGET: ${targetId}`, 58));
-    content.push('');
-    content.push(centerText('Not affected by exhaustion', 58));
-    return createBox('CONDITION NOT FOUND', content, undefined, 'HEAVY');
+    const display: string[] = [];
+    display.push(`## ⚠️ Condition Not Found`);
+    display.push('');
+    display.push(`**${displayName}** is not affected by **${icon} Exhaustion**`);
+
+    const response: ToolResponse = {
+      display: display.join('\n'),
+      data: {
+        success: false,
+        type: 'condition',
+        operation: 'remove',
+        target: { id: targetId, name: displayName },
+        error: 'Not affected by exhaustion',
+      },
+    };
+    return toResponse(response);
   }
 
   const currentLevel = existing.exhaustionLevel || 1;
@@ -661,11 +756,23 @@ function handleRemoveExhaustion(
     const index = conditions.findIndex(c => c.condition === 'exhaustion');
     conditions.splice(index, 1);
     conditionStore.set(targetId, conditions);
-    const content: string[] = [];
-    content.push(centerText(`TARGET: ${targetId}`, 58));
-    content.push('');
-    content.push(centerText('Exhaustion removed completely', 58));
-    return createBox('EXHAUSTION REMOVED', content, undefined, 'HEAVY');
+    
+    const display: string[] = [];
+    display.push(`## 🟢 Exhaustion Removed`);
+    display.push('');
+    display.push(`**${displayName}** is no longer **${icon} Exhausted**`);
+
+    const response: ToolResponse = {
+      display: display.join('\n'),
+      data: {
+        success: true,
+        type: 'condition',
+        operation: 'remove',
+        target: { id: targetId, name: displayName },
+        conditions: [{ condition: 'exhaustion' as Condition, exhaustionLevel: 0 }],
+      },
+    };
+    return toResponse(response);
   } else {
     // Reduce level
     existing.exhaustionLevel = newLevel;
@@ -682,69 +789,102 @@ function handleQueryConditions(targetId: string): string {
   const conditions = conditionStore.get(targetId) || [];
   const targetName = getCharacterNameById(targetId);
   const displayName = targetName || targetId;
-  const content: string[] = [];
-  const WIDTH = 58;
+  const display: string[] = [];
 
-  content.push(centerText(`TARGET: ${displayName}`, WIDTH));
-  content.push('');
+  display.push(`## 📋 Active Conditions: ${displayName}`);
+  display.push('');
 
   if (conditions.length === 0) {
-    content.push(centerText('No active conditions', WIDTH));
-    return createBox('CONDITION STATUS', content, undefined, 'HEAVY');
+    display.push('No active conditions');
+    display.push('');
+    display.push(`*ID: ${targetId}*`);
+
+    const response: ToolResponse = {
+      display: display.join('\n'),
+      data: {
+        success: true,
+        type: 'condition',
+        operation: 'query',
+        target: { id: targetId, name: displayName },
+        conditions: [],
+      },
+    };
+    return toResponse(response);
   }
 
-  const box = BOX.LIGHT;
-  content.push(box.H.repeat(WIDTH));
-  content.push('');
-
   for (const cond of conditions) {
+    const icon = formatConditionIcon(cond.condition);
+    
     if (cond.condition === 'exhaustion') {
       const level = cond.exhaustionLevel || 1;
-      content.push(centerText(`EXHAUSTION - LEVEL ${level}`, WIDTH));
-      content.push('');
-      content.push(padText(`Current Effect: ${EXHAUSTION_EFFECTS[level]}`, WIDTH, 'left'));
-      content.push('');
+      display.push(`### ${icon} Exhaustion - Level ${level}`);
+      display.push('');
+      display.push(`**Current Effect:** ${EXHAUSTION_EFFECTS[level]}`);
+      display.push('');
 
-      // Show all effects up to current level
-      content.push(padText('All Active Effects:', WIDTH, 'left'));
-      for (let i = 1; i <= level; i++) {
-        content.push(padText(`  ${i}. ${EXHAUSTION_EFFECTS[i]}`, WIDTH, 'left'));
+      if (level > 1) {
+        display.push('**All Active Effects:**');
+        for (let i = 1; i <= level; i++) {
+          display.push(`${i}. ${EXHAUSTION_EFFECTS[i]}`);
+        }
+        display.push('');
       }
     } else {
       const condName = cond.condition.charAt(0).toUpperCase() + cond.condition.slice(1);
-      content.push(centerText(condName.toUpperCase(), WIDTH));
-      content.push('');
+      display.push(`### ${icon} ${condName}`);
+      display.push('');
 
-      // Show effect description (either built-in or custom)
+      // Show effect description
       const effectText = cond.description
         || (cond.condition in CONDITION_EFFECTS ? CONDITION_EFFECTS[cond.condition as Condition] : 'Custom condition');
-      content.push(padText(`Effect: ${effectText}`, WIDTH, 'left'));
-      content.push('');
+      display.push(`> ${effectText}`);
+      display.push('');
 
+      const meta: string[] = [];
       if (cond.source) {
-        content.push(padText(`Source: ${cond.source}`, WIDTH, 'left'));
+        meta.push(`Source: ${cond.source}`);
       }
-
       if (cond.duration !== undefined) {
         if (typeof cond.duration === 'number' || cond.roundsRemaining !== undefined) {
           const rounds = cond.roundsRemaining ?? cond.duration;
-          content.push(padText(`Duration: ${rounds} round${rounds !== 1 ? 's' : ''} remaining`, WIDTH, 'left'));
+          meta.push(`Duration: ${rounds} round${rounds !== 1 ? 's' : ''}`);
         } else {
-          content.push(padText(`Duration: ${cond.duration.replace(/_/g, ' ')}`, WIDTH, 'left'));
+          meta.push(`Duration: ${cond.duration.replace(/_/g, ' ')}`);
         }
       }
-
       if (cond.saveDC) {
         const ability = cond.saveAbility?.toUpperCase() || 'SAVE';
-        content.push(padText(`Save: DC ${cond.saveDC} ${ability} to end`, WIDTH, 'left'));
+        meta.push(`DC ${cond.saveDC} ${ability} to end`);
+      }
+      if (meta.length > 0) {
+        display.push(`*${meta.join(' | ')}*`);
+        display.push('');
       }
     }
-    content.push('');
-    content.push(box.H.repeat(WIDTH));
-    content.push('');
   }
 
-  return createBox('CONDITION STATUS', content, undefined, 'HEAVY');
+  display.push('---');
+  display.push(`*ID: ${targetId}*`);
+
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'condition',
+      operation: 'query',
+      target: { id: targetId, name: displayName },
+      conditions: conditions.map(c => ({
+        condition: c.condition,
+        source: c.source,
+        duration: c.duration,
+        roundsRemaining: c.roundsRemaining,
+        exhaustionLevel: c.exhaustionLevel,
+        saveDC: c.saveDC,
+        saveAbility: c.saveAbility,
+      })),
+    },
+  };
+  return toResponse(response);
 }
 
 // ============================================================
@@ -753,8 +893,10 @@ function handleQueryConditions(targetId: string): string {
 
 function handleTickDuration(targetId: string, input: ManageConditionInput): string {
   const conditions = conditionStore.get(targetId) || [];
-  const expired: string[] = [];
-  const updated: string[] = [];
+  const targetName = getCharacterNameById(targetId);
+  const displayName = targetName || targetId;
+  const expired: Array<{ condition: string; icon: string }> = [];
+  const updated: Array<{ condition: string; icon: string; remaining: number }> = [];
 
   for (let i = conditions.length - 1; i >= 0; i--) {
     const cond = conditions[i];
@@ -764,40 +906,64 @@ function handleTickDuration(targetId: string, input: ManageConditionInput): stri
       cond.roundsRemaining -= 1;
 
       if (cond.roundsRemaining <= 0) {
-        expired.push(cond.condition);
+        expired.push({ condition: cond.condition, icon: formatConditionIcon(cond.condition) });
         conditions.splice(i, 1);
       } else {
-        updated.push(`${cond.condition} (${cond.roundsRemaining} round${cond.roundsRemaining !== 1 ? 's' : ''})`);
+        updated.push({ 
+          condition: cond.condition, 
+          icon: formatConditionIcon(cond.condition),
+          remaining: cond.roundsRemaining 
+        });
       }
     }
   }
 
   conditionStore.set(targetId, conditions);
 
-  const content: string[] = [];
-  const WIDTH = 58;
-
-  content.push(centerText(`TARGET: ${targetId}`, WIDTH));
-  content.push('');
-
-  const box = BOX.LIGHT;
-  content.push(box.H.repeat(WIDTH));
-  content.push('');
+  const display: string[] = [];
+  display.push(`## ⏱️ Duration Tick: ${displayName}`);
+  display.push('');
 
   if (expired.length > 0) {
-    content.push(padText(`Expired: ${expired.join(', ')}`, WIDTH, 'left'));
+    display.push('**Expired:**');
+    for (const e of expired) {
+      const name = e.condition.charAt(0).toUpperCase() + e.condition.slice(1);
+      display.push(`- ❌ ${e.icon} ${name}`);
+    }
+    display.push('');
   }
 
   if (updated.length > 0) {
-    if (expired.length > 0) content.push('');
-    content.push(padText(`Updated: ${updated.join(', ')}`, WIDTH, 'left'));
+    display.push('**Remaining:**');
+    for (const u of updated) {
+      const name = u.condition.charAt(0).toUpperCase() + u.condition.slice(1);
+      display.push(`- ${u.icon} ${name} - ${u.remaining} round${u.remaining !== 1 ? 's' : ''}`);
+    }
+    display.push('');
   }
 
   if (expired.length === 0 && updated.length === 0) {
-    content.push(centerText('No round-based conditions to update', WIDTH));
+    display.push('No round-based conditions to update');
+    display.push('');
   }
 
-  return createBox('CONDITION TICK', content, undefined, 'HEAVY');
+  display.push('---');
+  display.push(`*ID: ${targetId}*`);
+
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'condition',
+      operation: 'tick',
+      target: { id: targetId, name: displayName },
+      changes: [
+        ...expired.map(e => ({ condition: e.condition, expired: true })),
+        ...updated.map(u => ({ condition: u.condition, roundsRemaining: u.remaining })),
+      ],
+    },
+  };
+  return toResponse(response);
 }
 
 // ============================================================
@@ -812,74 +978,134 @@ function formatConditionUpdate(
 ): string {
   const targetName = getCharacterNameById(targetId);
   const displayName = targetName || targetId;
-  const content: string[] = [];
-  const WIDTH = 58;
+  const icon = formatConditionIcon(condition);
   const condName = condition.charAt(0).toUpperCase() + condition.slice(1);
-  const actionTitle = action.charAt(0).toUpperCase() + action.slice(1);
+  const display: string[] = [];
 
-  content.push(centerText(`TARGET: ${displayName}`, WIDTH));
-  content.push(centerText(`${condName} ${action}`, WIDTH));
-  content.push('');
-
-  const box = BOX.LIGHT;
-  content.push(box.H.repeat(WIDTH));
-  content.push('');
-
-  content.push(centerText(condName.toUpperCase(), WIDTH));
-  content.push('');
-  content.push(padText(`Effect: ${CONDITION_EFFECTS[condition]}`, WIDTH, 'left'));
-
-  if (conditionData.source) {
-    content.push('');
-    content.push(padText(`Source: ${conditionData.source}`, WIDTH, 'left'));
+  // Determine header based on action
+  if (action === 'added') {
+    display.push(`## 🔴 Condition Added`);
+    display.push('');
+    display.push(`**${displayName}** is now **${icon} ${condName}**`);
+  } else if (action === 'removed') {
+    display.push(`## 🟢 Condition Removed`);
+    display.push('');
+    display.push(`**${displayName}** is no longer **${icon} ${condName}**`);
+  } else {
+    // 'already has' case
+    display.push(`## ⚠️ Condition Already Active`);
+    display.push('');
+    display.push(`**${displayName}** already has **${icon} ${condName}**`);
   }
 
+  // Add effect description for add operation
+  if (action === 'added' && CONDITION_EFFECTS[condition]) {
+    display.push('');
+    display.push(`> ${CONDITION_EFFECTS[condition]}`);
+  }
+
+  // Source and duration
+  const meta: string[] = [];
+  if (conditionData.source) {
+    meta.push(`Source: ${conditionData.source}`);
+  }
   if (conditionData.duration !== undefined) {
     if (typeof conditionData.duration === 'number' || conditionData.roundsRemaining !== undefined) {
       const rounds = conditionData.roundsRemaining ?? conditionData.duration;
-      content.push('');
-      content.push(padText(`Duration: ${rounds} round${rounds !== 1 ? 's' : ''}`, WIDTH, 'left'));
+      meta.push(`Duration: ${rounds} round${rounds !== 1 ? 's' : ''}`);
     } else {
-      content.push('');
-      content.push(padText(`Duration: ${conditionData.duration.replace(/_/g, ' ')}`, WIDTH, 'left'));
+      meta.push(`Duration: ${conditionData.duration.replace(/_/g, ' ')}`);
     }
   }
-
   if (conditionData.saveDC) {
     const ability = conditionData.saveAbility?.toUpperCase() || 'SAVE';
-    content.push('');
-    content.push(padText(`Save: DC ${conditionData.saveDC} ${ability} to end`, WIDTH, 'left'));
+    meta.push(`DC ${conditionData.saveDC} ${ability} to end`);
   }
 
-  return createBox(`CONDITION ${actionTitle.toUpperCase()}`, content, undefined, 'HEAVY');
+  if (meta.length > 0) {
+    display.push('');
+    display.push(`*${meta.join(' | ')}*`);
+  }
+
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'condition',
+      operation: action === 'added' ? 'add' : action === 'removed' ? 'remove' : 'info',
+      target: { id: targetId, name: displayName },
+      conditions: [{
+        condition,
+        source: conditionData.source,
+        duration: conditionData.duration,
+        roundsRemaining: conditionData.roundsRemaining,
+        saveDC: conditionData.saveDC,
+        saveAbility: conditionData.saveAbility,
+      }],
+    },
+  };
+
+  return toResponse(response);
 }
 
 function formatExhaustionLevel(targetId: string, level: number, action: string): string {
   const targetName = getCharacterNameById(targetId);
   const displayName = targetName || targetId;
-  const content: string[] = [];
-  const WIDTH = 58;
-  const actionTitle = action.charAt(0).toUpperCase() + action.slice(1);
+  const icon = formatConditionIcon('exhaustion');
+  const display: string[] = [];
 
-  content.push(centerText(`TARGET: ${displayName}`, WIDTH));
-  content.push(centerText(`Exhaustion Level ${level}`, WIDTH));
-  content.push('');
-
-  const box = BOX.LIGHT;
-  content.push(box.H.repeat(WIDTH));
-  content.push('');
-
-  content.push(centerText('EXHAUSTION', WIDTH));
-  content.push('');
-  content.push(padText(`Current Effect: ${EXHAUSTION_EFFECTS[level]}`, WIDTH, 'left'));
-  content.push('');
-  content.push(padText('All Active Effects:', WIDTH, 'left'));
-
-  for (let i = 1; i <= level; i++) {
-    content.push(padText(`  ${i}. ${EXHAUSTION_EFFECTS[i]}`, WIDTH, 'left'));
+  // Determine header based on action
+  if (action === 'added') {
+    display.push(`## 🔴 Exhaustion Added`);
+    display.push('');
+    display.push(`**${displayName}** now has **${icon} Exhaustion Level ${level}**`);
+  } else if (action === 'increased to') {
+    display.push(`## 🔴 Exhaustion Increased`);
+    display.push('');
+    display.push(`**${displayName}** exhaustion increased to **${icon} Level ${level}**`);
+  } else if (action === 'reduced to') {
+    display.push(`## 🟢 Exhaustion Reduced`);
+    display.push('');
+    display.push(`**${displayName}** exhaustion reduced to **${icon} Level ${level}**`);
+  } else {
+    display.push(`## ${icon} Exhaustion - Level ${level}`);
+    display.push('');
+    display.push(`**${displayName}**`);
   }
 
-  return createBox(`EXHAUSTION ${actionTitle.toUpperCase()}`, content, undefined, 'HEAVY');
+  // Current effect
+  display.push('');
+  display.push(`**Current Effect:** ${EXHAUSTION_EFFECTS[level]}`);
+
+  // All active effects
+  if (level > 1) {
+    display.push('');
+    display.push('**All Active Effects:**');
+    for (let i = 1; i <= level; i++) {
+      display.push(`${i}. ${EXHAUSTION_EFFECTS[i]}`);
+    }
+  }
+
+  if (level >= 6) {
+    display.push('');
+    display.push('> ☠️ **Level 6: Death**');
+  }
+
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'condition',
+      operation: action === 'added' || action === 'increased to' ? 'add' : 'remove',
+      target: { id: targetId, name: displayName },
+      conditions: [{
+        condition: 'exhaustion' as Condition,
+        exhaustionLevel: level,
+      }],
+    },
+  };
+
+  return toResponse(response);
 }
 
 // ============================================================
@@ -1006,112 +1232,127 @@ export function createEncounter(input: CreateEncounterInput): string {
   return formatEncounterCreated(encounterState);
 }
 
-// Format encounter creation output
+// Format encounter creation output as Semantic Markdown with ToolResponse
 function formatEncounterCreated(encounter: EncounterState): string {
-  const content: string[] = [];
-  const WIDTH = 72;
+  const display: string[] = [];
 
   // Header
-  content.push(centerText(`Encounter ID: ${encounter.id}`, WIDTH));
-  content.push(centerText(`Round: ${encounter.round} | Lighting: ${encounter.lighting}`, WIDTH));
-  content.push(centerText(`${encounter.participants.length} Participants`, WIDTH));
-  content.push('');
-  content.push('═'.repeat(WIDTH));
-  content.push('');
+  display.push(`## ⚔️ Encounter Created`);
+  display.push('');
+  display.push(`**Round:** ${encounter.round} | **Lighting:** ${encounter.lighting} | **Combatants:** ${encounter.participants.length}`);
+  display.push('');
 
-  // Initiative Order
-  content.push(centerText('INITIATIVE ORDER', WIDTH));
-  content.push('');
-  content.push('─'.repeat(WIDTH));
-  content.push('');
+  // Initiative Order table
+  display.push('### Initiative Order');
+  display.push('');
+  display.push('| # | Name | Init | HP | AC | Pos |');
+  display.push('|:-:|------|:----:|:--:|:--:|:---:|');
 
-  // Table header - widened position column to 14 chars to fit "(100, 100) 50ft"
-  const header = ' #  | Name                | Init | HP          | AC | Position      ';
-  content.push(header);
-  content.push('─'.repeat(WIDTH));
-
-  // Participants
   for (let i = 0; i < encounter.participants.length; i++) {
     const p = encounter.participants[i];
-    const num = (i + 1).toString().padStart(2);
-    const name = p.name.padEnd(19).substring(0, 19);
-    const init = p.initiative.toString().padStart(4);
-    const hp = `${p.hp}/${p.maxHp}`.padEnd(11).substring(0, 11);
-    const ac = p.ac.toString().padStart(2);
+    const num = i + 1;
+    const name = p.isEnemy ? `🔴 ${p.name}` : `🟢 ${p.name}`;
+    const hp = `${p.hp}/${p.maxHp}`;
     
-    // Format position - wider column to fit elevation
-    let posStr = `(${p.position.x}, ${p.position.y})`;
+    // Format position
+    let posStr = `(${p.position.x},${p.position.y})`;
     if (p.position.z && p.position.z !== 0) {
-      posStr += ` ${p.position.z}ft`;
+      posStr += ` ↑${p.position.z}`;
     }
-    posStr = posStr.padEnd(14).substring(0, 14);
-
-    let line = ` ${num} | ${name} | ${init} | ${hp} | ${ac} | ${posStr}`;
     
     // Add markers
     const markers: string[] = [];
-    if (p.isEnemy) markers.push('[ENEMY]');
-    if (p.surprised) markers.push('[SURPRISED]');
-    if (p.size && p.size !== 'medium') markers.push(`[${p.size.toUpperCase()}]`);
+    if (p.surprised) markers.push('😵');
+    if (p.size && p.size !== 'medium') markers.push(p.size[0].toUpperCase());
     
-    if (markers.length > 0) {
-      line += ' ' + markers.join(' ');
-    }
-
-    content.push(line);
+    const markerStr = markers.length > 0 ? ' ' + markers.join('') : '';
+    
+    display.push(`| ${num} | ${name}${markerStr} | ${p.initiative} | ${hp} | ${p.ac} | ${posStr} |`);
   }
 
-  content.push('');
-  
-  // Initiative summary for each participant (helps with test regex matching)
-  content.push('─'.repeat(WIDTH));
-  content.push('');
-  for (const p of encounter.participants) {
-    const surprised = p.surprised ? ' (SURPRISED)' : '';
-    const sizeStr = p.size ? ` [${p.size}]` : '';
-    content.push(padText(`${p.name}: Initiative: ${p.initiative}${sizeStr}${surprised}`, WIDTH, 'left'));
+  display.push('');
+
+  // Current turn indicator
+  const currentCombatant = encounter.participants[encounter.currentTurnIndex];
+  if (currentCombatant) {
+    display.push(`**Current Turn:** ${currentCombatant.name}`);
+    display.push('');
   }
-  
-  content.push('');
-  content.push('═'.repeat(WIDTH));
-  content.push('');
 
   // Terrain info
+  display.push('### Terrain');
   const terrainParts: string[] = [];
-  terrainParts.push(`Terrain: ${encounter.terrain.width}x${encounter.terrain.height}`);
-  
+  terrainParts.push(`**Size:** ${encounter.terrain.width}×${encounter.terrain.height}`);
+
   if (encounter.terrain.obstacles && encounter.terrain.obstacles.length > 0) {
-    terrainParts.push(`Obstacles: ${encounter.terrain.obstacles.length}`);
+    terrainParts.push(`**Obstacles:** ${encounter.terrain.obstacles.length}`);
   }
-  
   if (encounter.terrain.difficultTerrain && encounter.terrain.difficultTerrain.length > 0) {
-    terrainParts.push(`Difficult terrain: ${encounter.terrain.difficultTerrain.length}`);
+    terrainParts.push(`**Difficult:** ${encounter.terrain.difficultTerrain.length}`);
   }
-  
   if (encounter.terrain.water && encounter.terrain.water.length > 0) {
-    terrainParts.push(`Water: ${encounter.terrain.water.length}`);
-  }
-  
-  if (encounter.terrain.hazards && encounter.terrain.hazards.length > 0) {
-    terrainParts.push(`Hazards: ${encounter.terrain.hazards.length}`);
+    terrainParts.push(`**Water:** ${encounter.terrain.water.length}`);
   }
 
-  content.push(padText(terrainParts.join(' | '), WIDTH, 'left'));
+  display.push(terrainParts.join(' | '));
 
-  // Hazard details if present
+  // Hazards if present
   if (encounter.terrain.hazards && encounter.terrain.hazards.length > 0) {
-    content.push('');
-    content.push(padText('Hazards:', WIDTH, 'left'));
+    display.push('');
+    display.push('**Hazards:**');
     for (const h of encounter.terrain.hazards) {
-      let hazardStr = `  ${h.position}: ${h.type}`;
+      let hazardStr = `- ${h.position}: ${h.type}`;
       if (h.dc) hazardStr += ` (DC ${h.dc})`;
       if (h.damage) hazardStr += ` ${h.damage} damage`;
-      content.push(padText(hazardStr, WIDTH, 'left'));
+      display.push(hazardStr);
     }
   }
 
-  return createBox('ENCOUNTER CREATED', content, undefined, 'HEAVY');
+  display.push('');
+  display.push('---');
+  display.push(`*Encounter ID: \`${encounter.id}\`*`);
+
+  // Build ToolResponse
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'encounter',
+      encounterId: encounter.id,
+      round: encounter.round,
+      lighting: encounter.lighting,
+      currentTurn: currentCombatant?.name,
+      participants: encounter.participants.map(p => ({
+        id: p.id,
+        name: p.name,
+        initiative: p.initiative,
+        hp: p.hp,
+        maxHp: p.maxHp,
+        ac: p.ac,
+        position: p.position,
+        isEnemy: p.isEnemy,
+        surprised: p.surprised,
+        size: p.size,
+      })),
+      terrain: {
+        width: encounter.terrain.width,
+        height: encounter.terrain.height,
+        obstacles: encounter.terrain.obstacles?.length || 0,
+        difficultTerrain: encounter.terrain.difficultTerrain?.length || 0,
+        water: encounter.terrain.water?.length || 0,
+        hazards: encounter.terrain.hazards?.length || 0,
+      },
+    },
+    suggestions: [
+      'Roll initiative if needed',
+      'Execute an attack action',
+      'Query conditions on combatants',
+    ],
+  };
+
+  return toResponse(response);
 }
+
 
 // Helper for testing: get encounter by ID
 export function getEncounter(id: string): EncounterState | undefined {
@@ -1398,41 +1639,59 @@ function handleDashAction(
   const tracker = getTurnTracker(input.encounterId, actor.id);
   tracker.hasDashed = true;
 
-  const content: string[] = [];
-  content.push(centerText(`${actor.name.toUpperCase()} DASHES!`, 50));
-  content.push('');
-  content.push('─'.repeat(50));
-  content.push('');
-  content.push(centerText(`Movement: ${actor.speed}ft → ${actor.speed * 2}ft`, 50));
-  content.push(centerText('(Doubled for this turn)', 50));
-  content.push('');
-  content.push('─'.repeat(50));
-  content.push('');
-  content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
+  const display: string[] = [];
+  display.push(`## 🏃 ${actor.name} Dashes!`);
+  display.push('');
+  display.push(`**Movement:** ${actor.speed}ft → ${actor.speed * 2}ft (doubled)`);
+
+  const opportunityAttacks: OpportunityAttackResult[] = [];
+  let moveResult = '';
 
   // Handle movement if specified
   if (input.moveTo) {
-    content.push('');
-    content.push('═'.repeat(50));
-    content.push('');
-    
-    // Check for opportunity attacks
+    // Check for opportunity attacks first
     const oaResults = checkOpportunityAttacks(encounter, actor, input.moveTo, tracker.disengagedThisTurn);
+    opportunityAttacks.push(...oaResults);
     
-    for (const oa of oaResults) {
-      content.push(centerText(`⚔ OPPORTUNITY ATTACK ⚔`, 50));
-      content.push(centerText(`${oa.attackerName} attacks!`, 50));
-      content.push(centerText(oa.result, 50));
-      content.push('');
+    if (oaResults.length > 0) {
+      display.push('');
+      display.push('### ⚔️ Opportunity Attacks');
+      for (const oa of oaResults) {
+        const icon = oa.hit ? '🔴' : '🟢';
+        display.push(`- ${icon} **${oa.attackerName}:** ${oa.result}`);
+      }
     }
 
     // Then process movement
-    const moveResult = handleMoveInternal(encounter, actor, input.moveTo);
-    content.push(padText(`Movement: ${moveResult}`, 50, 'left'));
+    moveResult = handleMoveInternal(encounter, actor, input.moveTo);
+    display.push('');
+    display.push(`**Movement:** ${moveResult}`);
   }
 
-  return createBox('DASH ACTION', content, undefined, 'HEAVY');
+  display.push('');
+  display.push(`*Action Cost: ${input.actionCost || 'action'}*`);
+
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'action',
+      actionType: 'dash',
+      actor: { id: actor.id, name: actor.name },
+      speed: { original: actor.speed, dashed: actor.speed * 2 },
+      movement: moveResult || null,
+      opportunityAttacks: opportunityAttacks.map(oa => ({
+        attacker: oa.attackerName,
+        hit: oa.hit,
+        damage: oa.damage,
+      })),
+      actionCost: input.actionCost || 'action',
+    },
+  };
+
+  return toResponse(response);
 }
+
 
 // ============================================================
 // OPPORTUNITY ATTACK CHECKER
@@ -1574,78 +1833,99 @@ function formatAttackResult(
   disadvantage?: boolean,
   movementInfo?: string
 ): string {
-  const content: string[] = [];
-  const WIDTH = 60;
+  const display: string[] = [];
 
-  // Header
-  content.push(centerText(`${attackerName} ATTACKS ${targetName}`, WIDTH));
-  content.push('');
-  content.push('═'.repeat(WIDTH));
-  content.push('');
+  // Header with result indicator
+  let resultIcon = '';
+  let resultText = '';
+  if (isCritical) {
+    resultIcon = '⭐';
+    resultText = 'CRITICAL HIT!';
+  } else if (isNat1) {
+    resultIcon = '💀';
+    resultText = 'Critical Miss';
+  } else if (isHit) {
+    resultIcon = '🎯';
+    resultText = 'Hit';
+  } else {
+    resultIcon = '🛡️';
+    resultText = 'Miss';
+  }
+
+  display.push(`## ${resultIcon} ${attackerName} → ${targetName}`);
+  display.push('');
 
   // Roll info
-  if (advantage) {
-    content.push(centerText('⚔ ATTACK ROLL (ADVANTAGE) ⚔', WIDTH));
-  } else if (disadvantage) {
-    content.push(centerText('⚔ ATTACK ROLL (DISADVANTAGE) ⚔', WIDTH));
-  } else {
-    content.push(centerText('⚔ ATTACK ROLL ⚔', WIDTH));
-  }
-  content.push('');
-  content.push(centerText(`Roll: ${rollDescription}`, WIDTH));
-  content.push(centerText(`vs AC ${targetAC}`, WIDTH));
-  content.push('');
-
-  // Result
-  if (isCritical) {
-    content.push(centerText('★★★ CRITICAL HIT! ★★★', WIDTH));
-  } else if (isNat1) {
-    content.push(centerText('✗ CRITICAL MISS ✗', WIDTH));
-  } else if (isHit) {
-    content.push(centerText('✓ HIT ✓', WIDTH));
-  } else {
-    content.push(centerText('✗ MISS ✗', WIDTH));
-  }
-
-  content.push('');
-  content.push('─'.repeat(WIDTH));
-  content.push('');
+  let rollModeText = '';
+  if (advantage) rollModeText = ' *(advantage)*';
+  else if (disadvantage) rollModeText = ' *(disadvantage)*';
+  
+  display.push(`**Attack:** ${rollDescription}${rollModeText} vs AC ${targetAC} — **${resultText}**`);
 
   // Damage (if hit)
   if (isHit && damage > 0) {
-    content.push(centerText('DAMAGE', WIDTH));
-    content.push('');
-    content.push(centerText(`${damageDescription} ${damageType}`, WIDTH));
-    content.push('');
-
+    display.push('');
+    display.push(`**Damage:** ${damageDescription} ${damageType}`);
+    
     // HP bar
-    const hpPercent = Math.floor((newHp / maxHp) * 20);
-    const hpBar = '█'.repeat(hpPercent) + '░'.repeat(20 - hpPercent);
-    content.push(centerText(`${targetName}: ${oldHp} → ${newHp}/${maxHp} HP`, WIDTH));
-    content.push(centerText(`[${hpBar}]`, WIDTH));
+    const hpPercent = Math.round((newHp / maxHp) * 100);
+    display.push(`**${targetName} HP:** ${oldHp} → ${newHp}/${maxHp} (${hpPercent}%)`);
 
     if (newHp === 0) {
-      content.push('');
-      content.push(centerText('☠ TARGET DOWN ☠', WIDTH));
+      display.push('');
+      display.push('☠️ **TARGET DOWN!**');
     }
   }
 
   // Movement (if any)
   if (movementInfo) {
-    content.push('');
-    content.push('─'.repeat(WIDTH));
-    content.push('');
-    content.push(padText(`Movement: ${movementInfo}`, WIDTH, 'left'));
+    display.push('');
+    display.push(`**Movement:** ${movementInfo}`);
   }
 
-  // Footer
-  content.push('');
-  content.push('═'.repeat(WIDTH));
-  content.push('');
-  content.push(padText(`Action Cost: ${actionCost}`, WIDTH, 'left'));
+  display.push('');
+  display.push(`*Action Cost: ${actionCost}*`);
 
-  return createBox('ATTACK RESULT', content, undefined, 'HEAVY');
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'action',
+      actionType: 'attack',
+      attacker: attackerName,
+      target: targetName,
+      attack: {
+        roll: attackRoll,
+        rollDescription,
+        targetAC,
+        hit: isHit,
+        critical: isCritical,
+        criticalMiss: isNat1,
+        advantage: advantage || false,
+        disadvantage: disadvantage || false,
+      },
+      damage: isHit ? {
+        amount: damage,
+        type: damageType,
+        description: damageDescription,
+      } : null,
+      targetHp: {
+        before: oldHp,
+        after: newHp,
+        max: maxHp,
+        down: newHp === 0,
+      },
+      movement: movementInfo || null,
+      actionCost,
+    },
+    suggestions: isHit && newHp === 0 
+      ? ['Target is down - consider next action']
+      : ['Continue combat'],
+  };
+
+  return toResponse(response);
 }
+
 
 // ============================================================
 // PHASE 2: TACTICAL ACTION HANDLERS
@@ -1659,19 +1939,26 @@ function handleDisengageAction(
   const tracker = getTurnTracker(input.encounterId, actor.id);
   tracker.disengagedThisTurn = true;
 
-  const content: string[] = [];
-  content.push(centerText(`${actor.name.toUpperCase()} DISENGAGES!`, 50));
-  content.push('');
-  content.push('─'.repeat(50));
-  content.push('');
-  content.push(centerText('Movement will not provoke', 50));
-  content.push(centerText('opportunity attacks this turn', 50));
-  content.push('');
-  content.push('─'.repeat(50));
-  content.push('');
-  content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
+  const display: string[] = [];
+  display.push(`## 🏃 ${actor.name} Disengages!`);
+  display.push('');
+  display.push('Movement will **not provoke opportunity attacks** this turn.');
+  display.push('');
+  display.push(`*Action Cost: ${input.actionCost || 'action'}*`);
 
-  return createBox('DISENGAGE ACTION', content, undefined, 'HEAVY');
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'action',
+      actionType: 'disengage',
+      actor: { id: actor.id, name: actor.name },
+      effect: 'No opportunity attacks this turn',
+      actionCost: input.actionCost || 'action',
+    },
+  };
+
+  return toResponse(response);
 }
 
 function handleDodgeAction(
@@ -1682,20 +1969,31 @@ function handleDodgeAction(
   const tracker = getTurnTracker(input.encounterId, actor.id);
   tracker.isDodging = true;
 
-  const content: string[] = [];
-  content.push(centerText(`${actor.name.toUpperCase()} DODGES!`, 50));
-  content.push('');
-  content.push('─'.repeat(50));
-  content.push('');
-  content.push(centerText('Until next turn:', 50));
-  content.push(centerText('• Attacks against you have DISADVANTAGE', 50));
-  content.push(centerText('• DEX saves have ADVANTAGE', 50));
-  content.push('');
-  content.push('─'.repeat(50));
-  content.push('');
-  content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
+  const display: string[] = [];
+  display.push(`## 🛡️ ${actor.name} Dodges!`);
+  display.push('');
+  display.push('**Until next turn:**');
+  display.push('- Attacks against you have **disadvantage**');
+  display.push('- DEX saves have **advantage**');
+  display.push('');
+  display.push(`*Action Cost: ${input.actionCost || 'action'}*`);
 
-  return createBox('DODGE ACTION', content, undefined, 'HEAVY');
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'action',
+      actionType: 'dodge',
+      actor: { id: actor.id, name: actor.name },
+      effects: [
+        'Attacks have disadvantage',
+        'DEX saves have advantage',
+      ],
+      actionCost: input.actionCost || 'action',
+    },
+  };
+
+  return toResponse(response);
 }
 
 function handleGrappleAction(
@@ -1715,38 +2013,45 @@ function handleGrappleAction(
   // Roll contested Athletics check
   const attackerRoll = input.manualAttackRoll ?? (Math.floor(Math.random() * 20) + 1);
   const defenderRoll = Math.floor(Math.random() * 20) + 1;
-
   const success = attackerRoll > defenderRoll;
 
-  const content: string[] = [];
-  content.push(centerText(`${actor.name.toUpperCase()} GRAPPLES ${target.name.toUpperCase()}`, 50));
-  content.push('');
-  content.push('═'.repeat(50));
-  content.push('');
-  content.push(centerText('CONTESTED ATHLETICS CHECK', 50));
-  content.push('');
-  content.push(centerText(`${actor.name}: ${attackerRoll}`, 50));
-  content.push(centerText(`${target.name}: ${defenderRoll}`, 50));
-  content.push('');
+  const display: string[] = [];
+  const resultIcon = success ? '✅' : '❌';
+  display.push(`## ${resultIcon} ${actor.name} Grapples ${target.name}`);
+  display.push('');
+  display.push('### Contested Athletics');
+  display.push(`- **${actor.name}:** ${attackerRoll}`);
+  display.push(`- **${target.name}:** ${defenderRoll}`);
+  display.push('');
 
   if (success) {
-    content.push(centerText('✓ GRAPPLE SUCCESS! ✓', 50));
-    content.push('');
-    content.push(centerText(`${target.name} is now GRAPPLED`, 50));
-    content.push(centerText('(Speed 0, can attempt escape)', 50));
-    // Apply grappled condition would go here via manage_condition
+    display.push(`**Success!** ${target.name} is now **grappled** (Speed 0, can attempt escape)`);
   } else {
-    content.push(centerText('✗ GRAPPLE FAILED ✗', 50));
-    content.push('');
-    content.push(centerText(`${target.name} breaks free!`, 50));
+    display.push(`**Failed!** ${target.name} breaks free!`);
   }
 
-  content.push('');
-  content.push('═'.repeat(50));
-  content.push('');
-  content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
+  display.push('');
+  display.push(`*Action Cost: ${input.actionCost || 'action'}*`);
 
-  return createBox('GRAPPLE ACTION', content, undefined, 'HEAVY');
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'action',
+      actionType: 'grapple',
+      actor: { id: actor.id, name: actor.name },
+      target: { id: target.id, name: target.name },
+      contest: {
+        attackerRoll,
+        defenderRoll,
+        success,
+      },
+      effect: success ? 'Target grappled' : 'Grapple failed',
+      actionCost: input.actionCost || 'action',
+    },
+  };
+
+  return toResponse(response);
 }
 
 function handleShoveAction(
@@ -1768,65 +2073,93 @@ function handleShoveAction(
   // Roll contested Athletics check
   const attackerRoll = input.manualAttackRoll ?? (Math.floor(Math.random() * 20) + 1);
   const defenderRoll = Math.floor(Math.random() * 20) + 1;
-
   const success = attackerRoll > defenderRoll;
 
-  const content: string[] = [];
-  content.push(centerText(`${actor.name.toUpperCase()} SHOVES ${target.name.toUpperCase()}`, 50));
-  content.push('');
-  content.push('═'.repeat(50));
-  content.push('');
-  content.push(centerText('CONTESTED ATHLETICS CHECK', 50));
-  content.push('');
-  content.push(centerText(`${actor.name}: ${attackerRoll}`, 50));
-  content.push(centerText(`${target.name}: ${defenderRoll}`, 50));
-  content.push('');
+  let newPosition: { x: number; y: number } | null = null;
+
+  if (success && shoveDirection === 'away') {
+    // Push 5ft away
+    const dx = target.position.x - actor.position.x;
+    const dy = target.position.y - actor.position.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    if (distance > 0) {
+      target.position.x += Math.sign(dx);
+      target.position.y += Math.sign(dy);
+    }
+    newPosition = { x: target.position.x, y: target.position.y };
+  }
+
+  const display: string[] = [];
+  const resultIcon = success ? '✅' : '❌';
+  display.push(`## ${resultIcon} ${actor.name} Shoves ${target.name}`);
+  display.push('');
+  display.push('### Contested Athletics');
+  display.push(`- **${actor.name}:** ${attackerRoll}`);
+  display.push(`- **${target.name}:** ${defenderRoll}`);
+  display.push('');
 
   if (success) {
     if (shoveDirection === 'prone') {
-      content.push(centerText('✓ SHOVE SUCCESS! ✓', 50));
-      content.push('');
-      content.push(centerText(`${target.name} is knocked PRONE`, 50));
-      // Apply prone condition would go here
+      display.push(`**Success!** ${target.name} is knocked **prone**`);
     } else {
-      // Push 5ft away
-      const dx = target.position.x - actor.position.x;
-      const dy = target.position.y - actor.position.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      if (distance > 0) {
-        // Normalize and push 1 square (5ft)
-        target.position.x += Math.sign(dx);
-        target.position.y += Math.sign(dy);
-      }
-
-      content.push(centerText('✓ SHOVE SUCCESS! ✓', 50));
-      content.push('');
-      content.push(centerText(`${target.name} pushed 5ft away!`, 50));
-      content.push(centerText(`New position: (${target.position.x}, ${target.position.y})`, 50));
+      display.push(`**Success!** ${target.name} pushed 5ft away!`);
+      display.push(`New position: (${target.position.x}, ${target.position.y})`);
     }
   } else {
-    content.push(centerText('✗ SHOVE FAILED ✗', 50));
-    content.push('');
-    content.push(centerText(`${target.name} holds their ground!`, 50));
+    display.push(`**Failed!** ${target.name} holds their ground!`);
   }
 
-  content.push('');
-  content.push('═'.repeat(50));
-  content.push('');
-  content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
+  display.push('');
+  display.push(`*Action Cost: ${input.actionCost || 'action'}*`);
 
-  return createBox('SHOVE ACTION', content, undefined, 'HEAVY');
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: true,
+      type: 'action',
+      actionType: 'shove',
+      actor: { id: actor.id, name: actor.name },
+      target: { id: target.id, name: target.name },
+      contest: {
+        attackerRoll,
+        defenderRoll,
+        success,
+      },
+      shoveDirection,
+      effect: success 
+        ? (shoveDirection === 'prone' ? 'Target prone' : 'Target pushed 5ft')
+        : 'Shove failed',
+      newPosition,
+      actionCost: input.actionCost || 'action',
+    },
+  };
+
+  return toResponse(response);
 }
 
 function formatActionNotImplemented(actorName: string, actionType: ActionType): string {
-  const content: string[] = [];
-  content.push(centerText(`${actorName} uses ${actionType.toUpperCase()}`, 50));
-  content.push('');
-  content.push(centerText('(Action type not yet implemented)', 50));
-  content.push(centerText('Supports: attack, dash, disengage, dodge, grapple, shove', 50));
-  
-  return createBox('ACTION', content, undefined, 'HEAVY');
+  const display: string[] = [];
+  display.push(`## ⚠️ ${actorName} uses ${actionType}`);
+  display.push('');
+  display.push('*Action type not yet implemented*');
+  display.push('');
+  display.push('**Supported actions:** attack, dash, disengage, dodge, grapple, shove');
+
+  const response: ToolResponse = {
+    display: display.join('\n'),
+    data: {
+      success: false,
+      type: 'action',
+      actionType,
+      actor: actorName,
+      error: 'Action type not implemented',
+      supportedActions: ['attack', 'dash', 'disengage', 'dodge', 'grapple', 'shove'],
+    },
+  };
+
+  return toResponse(response);
 }
+
 
 

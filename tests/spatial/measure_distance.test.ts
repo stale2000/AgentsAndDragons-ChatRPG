@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { handleToolCall } from '../../src/registry.js';
-import { getTextContent } from '../helpers.js';
+import { getTextContent, parseToolResponse } from '../helpers.js';
 
 describe('measure_distance', () => {
   describe('Grid 5e Mode (Default)', () => {
@@ -14,10 +14,10 @@ describe('measure_distance', () => {
         from: { x: 0, y: 0, z: 0 },
         to: { x: 3, y: 0, z: 0 },
       });
-      const text = getTextContent(result);
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('15 feet');
-      expect(text).toContain('3 squares');
+      const response = parseToolResponse(result);
+      expect(response.data.distanceFeet).toBe(15);
+      expect(response.data.distanceSquares).toBe(3);
     });
 
     it('should calculate vertical distance', async () => {
@@ -25,9 +25,9 @@ describe('measure_distance', () => {
         from: { x: 0, y: 0, z: 0 },
         to: { x: 0, y: 4, z: 0 },
       });
-      const text = getTextContent(result);
-      expect(text).toContain('20 feet');
-      expect(text).toContain('4 squares');
+      const response = parseToolResponse(result);
+      expect(response.data.distanceFeet).toBe(20);
+      expect(response.data.distanceSquares).toBe(4);
     });
 
     it('should calculate diagonal as 5ft (simplified)', async () => {
@@ -36,10 +36,10 @@ describe('measure_distance', () => {
         to: { x: 2, y: 2, z: 0 },
         mode: 'grid_5e',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // Grid 5e: max(|Δx|, |Δy|) = max(2, 2) = 2 squares = 10 feet
-      expect(text).toContain('10 feet');
-      expect(text).toContain('2 squares');
+      expect(response.data.distanceFeet).toBe(10);
+      expect(response.data.distanceSquares).toBe(2);
     });
 
     it('should handle multi-square diagonal paths', async () => {
@@ -48,10 +48,10 @@ describe('measure_distance', () => {
         to: { x: 5, y: 3, z: 0 },
         mode: 'grid_5e',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // Grid 5e: max(5, 3) = 5 squares = 25 feet
-      expect(text).toContain('25 feet');
-      expect(text).toContain('5 squares');
+      expect(response.data.distanceFeet).toBe(25);
+      expect(response.data.distanceSquares).toBe(5);
     });
   });
 
@@ -62,10 +62,10 @@ describe('measure_distance', () => {
         to: { x: 3, y: 0, z: 0 },
         mode: 'euclidean',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // √(3²) × 5 = 15 feet
-      expect(text).toContain('15 feet');
-      expect(text).toContain('3 squares');
+      expect(response.data.distanceFeet).toBe(15);
+      expect(response.data.distanceSquares).toBe(3);
     });
 
     it('should handle 3-4-5 triangle correctly', async () => {
@@ -74,10 +74,10 @@ describe('measure_distance', () => {
         to: { x: 3, y: 4, z: 0 },
         mode: 'euclidean',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // √(3² + 4²) × 5 = √25 × 5 = 5 × 5 = 25 feet
-      expect(text).toContain('25 feet');
-      expect(text).toContain('5 squares');
+      expect(response.data.distanceFeet).toBe(25);
+      expect(response.data.distanceSquares).toBe(5);
     });
   });
 
@@ -88,10 +88,10 @@ describe('measure_distance', () => {
         to: { x: 4, y: 4, z: 0 },
         mode: 'grid_alt',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // 4 diagonals: 5+10+5+10 = 30 feet
-      expect(text).toContain('30 feet');
-      expect(text).toContain('4 squares');
+      expect(response.data.distanceFeet).toBe(30);
+      expect(response.data.distanceSquares).toBe(4);
     });
 
     it('should calculate mixed paths correctly', async () => {
@@ -100,10 +100,10 @@ describe('measure_distance', () => {
         to: { x: 5, y: 3, z: 0 },
         mode: 'grid_alt',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // 3 diagonals (5+10+5=20) + 2 straight (2×5=10) = 30 feet
-      expect(text).toContain('30 feet');
-      expect(text).toContain('5 squares');
+      expect(response.data.distanceFeet).toBe(30);
+      expect(response.data.distanceSquares).toBe(5);
     });
   });
 
@@ -115,10 +115,10 @@ describe('measure_distance', () => {
         mode: 'euclidean',
         includeElevation: true,
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // √(3² + 4² + 12²) × 5 = √(9+16+144) × 5 = √169 × 5 = 13 × 5 = 65 feet
-      expect(text).toContain('65 feet');
-      expect(text).toContain('13 squares');
+      expect(response.data.distanceFeet).toBe(65);
+      expect(response.data.distanceSquares).toBe(13);
     });
 
     it('should ignore elevation when includeElevation is false', async () => {
@@ -128,10 +128,10 @@ describe('measure_distance', () => {
         mode: 'euclidean',
         includeElevation: false,
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // √(3² + 4²) × 5 = 25 feet (ignoring z)
-      expect(text).toContain('25 feet');
-      expect(text).toContain('5 squares');
+      expect(response.data.distanceFeet).toBe(25);
+      expect(response.data.distanceSquares).toBe(5);
     });
 
     it('should handle flying creature distances', async () => {
@@ -140,41 +140,43 @@ describe('measure_distance', () => {
         to: { x: 0, y: 0, z: 6 },
         mode: 'grid_5e',
       });
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
       // 6 squares vertical = 30 feet
-      expect(text).toContain('30 feet');
-      expect(text).toContain('6 squares');
+      expect(response.data.distanceFeet).toBe(30);
+      expect(response.data.distanceSquares).toBe(6);
     });
   });
 
-  describe('Output Format', () => {
-    it('should return distance in feet', async () => {
+  describe('Semantic Markdown Output', () => {
+    it('should return valid ToolResponse JSON', async () => {
       const result = await handleToolCall('measure_distance', {
         from: { x: 0, y: 0, z: 0 },
         to: { x: 2, y: 2, z: 0 },
       });
-      const text = getTextContent(result);
-      expect(text).toMatch(/\d+ feet/);
+      const response = parseToolResponse(result);
+      expect(response).toHaveProperty('display');
+      expect(response).toHaveProperty('data');
+      expect(response.data.type).toBe('distance');
     });
 
-    it('should return distance in squares', async () => {
+    it('should include distance in display', async () => {
       const result = await handleToolCall('measure_distance', {
         from: { x: 0, y: 0, z: 0 },
         to: { x: 2, y: 2, z: 0 },
       });
-      const text = getTextContent(result);
-      expect(text).toMatch(/\d+ squares/);
+      const response = parseToolResponse(result);
+      expect(response.display).toMatch(/Distance: \d+ft/);
     });
 
-    it('should include ASCII art formatting', async () => {
+    it('should include structured data', async () => {
       const result = await handleToolCall('measure_distance', {
         from: { x: 0, y: 0, z: 0 },
         to: { x: 3, y: 4, z: 0 },
       });
-      const text = getTextContent(result);
-      expect(text).toContain('╔'); // ASCII box border
-      expect(text).toContain('DISTANCE');
-      expect(text).toContain('Path:'); // Arrow path visualization
+      const response = parseToolResponse(result);
+      expect(response.data.distanceFeet).toBeDefined();
+      expect(response.data.distanceSquares).toBeDefined();
+      expect(response.data.mode).toBeDefined();
     });
   });
 
@@ -184,10 +186,10 @@ describe('measure_distance', () => {
         from: { x: 0, y: 0 },
         to: { x: 3, y: 4 },
       });
-      const text = getTextContent(result);
       // Should default z to 0 and still work
       expect(result.isError).toBeUndefined();
-      expect(text).toContain('feet');
+      const response = parseToolResponse(result);
+      expect(response.data.distanceFeet).toBeDefined();
     });
   });
 });

@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { handleToolCall } from '../../src/registry.js';
-import { getTextContent } from '../helpers.js';
+import { getTextContent, parseToolResponse } from '../helpers.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -36,19 +36,30 @@ describe('get_character', () => {
     });
 
     if (result.isError) {
+      const errorText = getTextContent(result);
+      throw new Error(`Failed to create test character: ${errorText}`);
+    }
+
+    let response: any;
+    try {
+      response = parseToolResponse(result);
+    } catch (parseError) {
+      // If JSON.parse fails, the text might be stringified - try to extract raw ID from display
       const text = getTextContent(result);
-      throw new Error(`Failed to create test character: ${text}`);
+      // Try to find the ID anywhere in the text (fallback for parsing issues)
+      const idMatch = text.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/);
+      if (idMatch && idMatch[1]) {
+        return idMatch[1];
+      }
+      throw new Error(`Failed to parse response: ${String(parseError)}`);
+    }
+    
+    const characterId = response.data?.character?.id;
+    if (!characterId || typeof characterId !== 'string') {
+      throw new Error(`Failed to extract character ID. Response: ${JSON.stringify(response).slice(0, 200)}`);
     }
 
-    const text = getTextContent(result);
-    const match = text.match(/Character ID: ([a-z0-9-]+)/);
-    const id = match ? match[1] : '';
-
-    if (!id) {
-      throw new Error(`Failed to extract character ID from: ${text}`);
-    }
-
-    return id;
+    return characterId;
   }
 
   // Clean up before and after all tests in this suite
@@ -103,15 +114,16 @@ describe('get_character', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
 
-      // Check for ability scores
-      expect(text).toContain('DEX');
-      expect(text).toContain('18');
+      // Check for ability scores in display
+      expect(response.display).toContain('DEX');
+      expect(response.display).toContain('18');
 
-      // Check for other character info
-      expect(text).toContain('Halfling');
-      expect(text).toContain('Criminal');
+      // Check for race info in display
+      expect(response.display).toContain('Halfling');
+      // Background is in data, not display
+      expect(response.data.character.race).toBe('Halfling');
     });
 
     it('should include calculated values (modifiers, proficiency)', async () => {
@@ -122,13 +134,13 @@ describe('get_character', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
 
-      // Check for proficiency bonus (level 5 = +3)
-      expect(text).toContain('+3');
+      // Check for proficiency bonus in data (level 5 = +3)
+      expect(response.data.character.proficiencyBonus).toBe(3);
 
-      // Check for ability modifier formatting (DEX 18 = +4)
-      expect(text).toContain('+4');
+      // Check for ability modifier formatting in display (DEX 18 = +4)
+      expect(response.display).toContain('+4');
     });
   });
 
@@ -156,7 +168,7 @@ describe('get_character', () => {
   });
 
   describe('Output Format', () => {
-    it('should return ASCII art character sheet', async () => {
+    it('should return ToolResponse JSON with display and data fields', async () => {
       const testCharacterId = await createTestCharacter();
 
       const result = await handleToolCall('get_character', {
@@ -164,17 +176,17 @@ describe('get_character', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
 
-      // Should have ASCII box borders
-      expect(text).toContain('╔');
-
-      // Should have HP bar and table formatting
-      expect(text).toContain('HP: [');
-      expect(text).toContain('│'); // Table borders
+      // Should have display and data fields
+      expect(response.display).toBeDefined();
+      expect(response.data).toBeDefined();
+      expect(response.data.success).toBe(true);
+      expect(response.data.type).toBe('character');
+      expect(response.data.character).toBeDefined();
     });
 
-    it('should include all ability scores with modifiers', async () => {
+    it('should include Semantic Markdown header in display', async () => {
       const testCharacterId = await createTestCharacter();
 
       const result = await handleToolCall('get_character', {
@@ -182,15 +194,85 @@ describe('get_character', () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const text = getTextContent(result);
+      const response = parseToolResponse(result);
 
-      // Check all six ability scores are present
-      expect(text).toContain('STR');
-      expect(text).toContain('DEX');
-      expect(text).toContain('CON');
-      expect(text).toContain('INT');
-      expect(text).toContain('WIS');
-      expect(text).toContain('CHA');
+      // Should have markdown header format
+      expect(response.display).toContain('## 📜');
+      expect(response.display).toContain('Test Retrieval Character');
+      expect(response.display).toContain('Level 5');
+    });
+
+    it('should include Combat Stats table in markdown', async () => {
+      const testCharacterId = await createTestCharacter();
+
+      const result = await handleToolCall('get_character', {
+        characterId: testCharacterId
+      });
+
+      expect(result.isError).toBeUndefined();
+      const response = parseToolResponse(result);
+
+      // Should have combat stats section
+      expect(response.display).toContain('### Combat Stats');
+      expect(response.display).toContain('HP');
+      expect(response.display).toContain('AC');
+    });
+
+    it('should include all ability scores in Ability Scores table', async () => {
+      const testCharacterId = await createTestCharacter();
+
+      const result = await handleToolCall('get_character', {
+        characterId: testCharacterId
+      });
+
+      expect(result.isError).toBeUndefined();
+      const response = parseToolResponse(result);
+
+      // Check all six ability scores are present in display
+      expect(response.display).toContain('STR');
+      expect(response.display).toContain('DEX');
+      expect(response.display).toContain('CON');
+      expect(response.display).toContain('INT');
+      expect(response.display).toContain('WIS');
+      expect(response.display).toContain('CHA');
+
+      // Also check data structure
+      const { stats } = response.data.character;
+      expect(stats.str).toBe(10);
+      expect(stats.dex).toBe(18);
+      expect(stats.con).toBe(12);
+      expect(stats.int).toBe(14);
+      expect(stats.wis).toBe(10);
+      expect(stats.cha).toBe(14);
+    });
+
+    it('should include HP bar visual in display', async () => {
+      const testCharacterId = await createTestCharacter();
+
+      const result = await handleToolCall('get_character', {
+        characterId: testCharacterId
+      });
+
+      expect(result.isError).toBeUndefined();
+      const response = parseToolResponse(result);
+
+      // Should have HP bar format with blocks
+      expect(response.display).toMatch(/[█▓░]/);
+    });
+
+    it('should include character ID in footer', async () => {
+      const testCharacterId = await createTestCharacter();
+
+      const result = await handleToolCall('get_character', {
+        characterId: testCharacterId
+      });
+
+      expect(result.isError).toBeUndefined();
+      const response = parseToolResponse(result);
+
+      // Should have ID footer
+      expect(response.display).toContain('*ID:');
+      expect(response.display).toContain(testCharacterId);
     });
   });
 });
