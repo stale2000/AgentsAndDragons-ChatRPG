@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm run build:*)",
+      "Bash(node -e \"import(''./dist/registry.js'').then(m => m.handleToolCall(''create_character'', {name: ''Test Hero'', class: ''Wizard'', level: 3})).then(r => console.log(r.content[0].text))\")",
+      "Bash(node -e \"import(''./src/registry.js'').then(m => m.handleToolCall(''create_character'', {name: ''Test'', class: ''Fighter'', level: 1})).then(r => console.log(r.content[0].text))\")",
+      "Bash(npx tsc --noEmit)",
+      "Bash(dir /T:W /O:-D testscombatmanage_condition.test.ts testscharactersget_character.test.ts)",
+      "Bash(dir:*)",
+      "Bash(node:*)",
+      "Bash(cat:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

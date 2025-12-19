@@ -1,0 +1,34 @@
+{
+  "name": "rpg-lite-mcp",
+  "version": "0.1.0",
+  "description": "Lightweight D&D 5e LLM-as-DM Engine - 50 Core Tools",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "rpg-lite-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": ["mcp", "dnd", "5e", "rpg", "llm", "ai", "dm"],
+  "author": "Mnehmos",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
