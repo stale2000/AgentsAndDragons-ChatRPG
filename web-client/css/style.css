@@ -161,6 +161,41 @@ h1 {
   font-family: monospace;
 }
 
+/* Tool details (collapsible) */
+.message.system details {
+  margin-top: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.message.system summary {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  user-select: none;
+  font-weight: bold;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.message.system summary:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.message.system details pre {
+  margin: 0 !important;
+  padding: 0.75rem !important;
+  border-radius: 0 !important;
+  border: none !important;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 0.8em;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .message-content p {
   margin-bottom: 0.5rem;
 }

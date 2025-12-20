@@ -228,17 +228,24 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
 
                 // 1. Inputs (Arguments)
                 if (item.args) {
-                    // Check if args is string or object
                     const argsStr = typeof item.args === 'string' ? item.args : JSON.stringify(item.args, null, 2);
-                    content += `\n**Input:**\n\`\`\`json\n${argsStr}\n\`\`\``;
+                    content += `
+<details>
+  <summary>Input Arguments</summary>
+  <pre><code class="language-json">${argsStr}</code></pre>
+</details>`;
                 }
 
                 // 2. Results / Errors
                 if (item.error) {
                     const errStr = typeof item.error === 'string' ? item.error : JSON.stringify(item.error, null, 2);
-                     content += `\n**Error:**\n\`\`\`text\n${errStr}\n\`\`\``;
+                     content += `
+<details open>
+  <summary style="color: var(--error-color)">Error Details</summary>
+  <pre><code class="language-text">${errStr}</code></pre>
+</details>`;
                 } else if (item.result) {
-                    // Handle MCP result content (often array of type: 'text')
+                    // Handle MCP result content
                     let resText = '';
                     
                     if (item.result.content && Array.isArray(item.result.content)) {
@@ -252,12 +259,13 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
                         resText = JSON.stringify(item.result, null, 2);
                     }
 
-                    // Special handling for ASCII art or large blocks
-                    if (resText.includes('\n') || resText.length > 50) {
-                        content += `\n**Output:**\n\`\`\`text\n${resText}\n\`\`\``;
-                    } else {
-                        content += `\n**Output:** \`${resText}\``;
-                    }
+                    // Always use details for output to keep it clean but accessible
+                    const isLong = resText.length > 50 || resText.includes('\n');
+                    content += `
+<details ${isLong ? '' : 'open'}>
+  <summary>Output Result</summary>
+  <pre><code class="language-text">${resText}</code></pre>
+</details>`;
                 }
                 
                 responseItems.push({
