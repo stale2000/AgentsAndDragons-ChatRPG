@@ -262,17 +262,19 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
                 }
 
                 // 3. Output - OpenAI MCP uses "output" property (string or object)
+                // Display output prominently (not collapsed) - this is the main content!
                 const rawOutput = item.output || item.result;
 
                 if (rawOutput) {
                     let outputText = '';
 
                     if (typeof rawOutput === 'string') {
-                        // Try to parse and pretty-print if JSON
+                        // Check if it's JSON - if so, pretty-print; otherwise show as-is (ASCII art, etc.)
                         try {
                             const parsed = JSON.parse(rawOutput);
                             outputText = JSON.stringify(parsed, null, 2);
                         } catch {
+                            // Not JSON - likely ASCII art or plain text, show as-is
                             outputText = rawOutput;
                         }
                     } else if (rawOutput.content && Array.isArray(rawOutput.content)) {
@@ -285,11 +287,9 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
                         outputText = JSON.stringify(rawOutput, null, 2);
                     }
 
+                    // Output shown prominently - no collapsible wrapper
                     content += `
-<details>
-  <summary>📤 Output</summary>
-  <pre><code class="language-json">${outputText}</code></pre>
-</details>`;
+<pre class="tool-output-display"><code>${outputText}</code></pre>`;
                 }
                 
                 responseItems.push({

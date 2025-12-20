@@ -196,6 +196,21 @@ h1 {
   word-break: break-all;
 }
 
+/* Prominent tool output display (not collapsed) */
+.message.system .tool-output-display {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--primary-color);
+  border-left: 3px solid var(--primary-color);
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: none;
+}
+
 .message-content p {
   margin-bottom: 0.5rem;
 }
