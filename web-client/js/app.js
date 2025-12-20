@@ -224,10 +224,46 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
                 const status = item.status || 'unknown';
                 const icon = status === 'completed' ? '✅' : (status === 'failed' ? '❌' : '🛠️');
                 
+                let content = `**${icon} Tool Usage:** \`${toolName}\` (${status})`;
+
+                // 1. Inputs (Arguments)
+                if (item.args) {
+                    // Check if args is string or object
+                    const argsStr = typeof item.args === 'string' ? item.args : JSON.stringify(item.args, null, 2);
+                    content += `\n**Input:**\n\`\`\`json\n${argsStr}\n\`\`\``;
+                }
+
+                // 2. Results / Errors
+                if (item.error) {
+                    const errStr = typeof item.error === 'string' ? item.error : JSON.stringify(item.error, null, 2);
+                     content += `\n**Error:**\n\`\`\`text\n${errStr}\n\`\`\``;
+                } else if (item.result) {
+                    // Handle MCP result content (often array of type: 'text')
+                    let resText = '';
+                    
+                    if (item.result.content && Array.isArray(item.result.content)) {
+                        resText = item.result.content
+                            .filter(c => c.type === 'text')
+                            .map(c => c.text)
+                            .join('\n');
+                    } else if (typeof item.result === 'string') {
+                        resText = item.result;
+                    } else {
+                        resText = JSON.stringify(item.result, null, 2);
+                    }
+
+                    // Special handling for ASCII art or large blocks
+                    if (resText.includes('\n') || resText.length > 50) {
+                        content += `\n**Output:**\n\`\`\`text\n${resText}\n\`\`\``;
+                    } else {
+                        content += `\n**Output:** \`${resText}\``;
+                    }
+                }
+                
                 responseItems.push({
                     type: 'tool',
                     role: 'system', // Use system role for lighter styling
-                    content: `**${icon} Tool Usage:** \`${toolName}\` (${status})`
+                    content: content
                 });
             });
 
