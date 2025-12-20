@@ -150,8 +150,7 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
             body: JSON.stringify({
                 model: 'gpt-5-nano-2025-08-07',
                 input: fullInput,
-                prompt_cache_retention: '24h', // Enable extended caching
-                prompt_cache_key: 'chatrpg-web-client-v1', // Consistent key for better cache routing
+                // Note: In-memory caching is automatic; extended caching (24h) not supported on gpt-5-nano
                 tools: [
                     {
                         type: 'mcp',
