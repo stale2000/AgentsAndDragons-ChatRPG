@@ -134,47 +134,39 @@ class ChatApp {
 
     async callOpenAI(userMessage) {
         // System prompt - placed first to maximize cache hits
-        const systemPrompt = `You are an engaging Dungeon Master running a D&D 5e campaign, powered by the ChatRPG MCP server.
+        const systemPrompt = `You are a Dungeon Master running a D&D 5e campaign. The user is the PLAYER.
 
-## Your Role
-You ARE the Dungeon Master. The user is a PLAYER in your game. Treat every interaction as part of an ongoing adventure:
-- Narrate the world vividly - describe scenes, NPCs, and events with atmosphere
-- React to player actions with consequences and story progression
-- Use dramatic tension, humor, and character voices to bring the world alive
-- Always stay in character as the DM unless the player explicitly asks for out-of-game help
+## CRITICAL: Always Use Tools
+You MUST use ChatRPG tools for ALL game mechanics. Never describe what tools can do - just USE them.
+- Player asks to attack? -> Call execute_action immediately
+- Player wants to create a character? -> Call create_character immediately
+- Player wants to check something? -> Call roll_check immediately
+- Starting a fight? -> Call create_encounter immediately
 
-## Gameplay Flow
-When players take actions:
-1. Acknowledge what they're attempting with brief narrative flair
-2. Use ChatRPG tools to resolve mechanics (rolls, damage, conditions, etc.)
-3. Narrate the OUTCOME cinematically - don't just report numbers
-4. Advance the story or prompt the next decision
+DO NOT list available tools or explain capabilities. Just take action.
 
-Example:
-- Player: "I swing my axe at the goblin!"
-- You: *Describe the tense moment* -> Use execute_action tool -> *Narrate the hit/miss dramatically with the result*
+## Response Pattern
+1. Brief narrative setup (1-2 sentences max)
+2. CALL THE TOOL - this is mandatory
+3. Narrate the result dramatically
 
-## Tool Usage Guidelines
-- Use tools BETWEEN narrative beats, not as a replacement for storytelling
-- After tool results, always follow up with narrative description
-- Combine multiple tool calls when needed (e.g., attack + damage + condition check)
-- Keep the game flowing - don't over-explain mechanics unless asked
+## Example
+Player: "I attack the goblin with my sword"
+You: "You raise your blade, firelight glinting off the steel—" [call execute_action] "—and bring it crashing down! The goblin shrieks as your sword bites deep, green blood spraying across the stone floor. It staggers back, clutching the wound."
 
-## Combat Narration
-- Describe attacks with visceral detail ("Your blade catches firelight as it arcs down...")
-- Make hits feel impactful and misses feel tense, not disappointing
-- Track the battlefield verbally ("The remaining two goblins scramble behind the overturned table...")
-- Build tension as HP drops ("The ogre staggers, blood streaming from a dozen wounds...")
+## Combat Style
+- Visceral, cinematic descriptions
+- Build tension as HP drops
+- Track battlefield position verbally
+- Make crits feel EPIC, misses feel tense
 
-## Between Combat
-- Create memorable NPCs with distinct voices and motivations
-- Describe environments with sensory details (sounds, smells, lighting)
-- Offer meaningful choices with real consequences
-- Reward creative problem-solving
+## Non-Combat
+- NPCs have distinct voices
+- Environments use all senses
+- Choices have consequences
+- Reward creativity
 
-## Remember
-You're not an assistant - you're a DUNGEON MASTER. Be theatrical. Be fair. Be fun.
-When in doubt: What would make this moment more exciting for the player?`;
+You are the DM. Don't explain - PLAY.`;
 
         // Build conversation context (recent history for continuity)
         // Note: Current user message is already in history, so we include it in the context
@@ -479,26 +471,64 @@ When in doubt: What would make this moment more exciting for the player?`;
                             streamingContentDiv.innerHTML = this.formatMessage(currentTextContent) + '<span class="streaming-cursor">▌</span>';
                             this.scrollToBottom();
 
-                        } else if (event.type === 'response.mcp_call.started') {
-                            // MCP tool call started
-                            const callId = event.item_id || event.call_id;
+                        } else if (event.type === 'response.output_item.added' && event.item?.type === 'mcp_call') {
+                            // MCP tool call added (new format)
+                            const item = event.item;
+                            const callId = item.id;
                             currentMcpCalls.set(callId, {
                                 type: 'mcp_call',
-                                name: event.name || 'unknown_tool',
-                                arguments: event.arguments || '',
-                                status: 'in_progress',
-                                output: null,
-                                error: null
+                                name: item.name || 'unknown_tool',
+                                arguments: item.arguments || '',
+                                status: item.status || 'in_progress',
+                                output: item.output,
+                                error: item.error
                             });
-                            this.updateStatus('connecting', `Calling ${event.name}...`);
+                            this.updateStatus('connecting', `Calling ${item.name}...`);
+
+                        } else if (event.type === 'response.mcp_call.in_progress') {
+                            // MCP tool call in progress
+                            const callId = event.item_id;
+                            if (!currentMcpCalls.has(callId)) {
+                                currentMcpCalls.set(callId, {
+                                    type: 'mcp_call',
+                                    name: 'unknown_tool',
+                                    arguments: '',
+                                    status: 'in_progress',
+                                    output: null,
+                                    error: null
+                                });
+                            }
+
+                        } else if (event.type === 'response.mcp_call_arguments.done') {
+                            // MCP tool call arguments finalized
+                            const callId = event.item_id;
+                            const mcpCall = currentMcpCalls.get(callId);
+                            if (mcpCall) {
+                                mcpCall.arguments = event.arguments || mcpCall.arguments;
+                            }
+
+                        } else if (event.type === 'response.output_item.done' && event.item?.type === 'mcp_call') {
+                            // MCP tool call completed (final state in output_item.done)
+                            const item = event.item;
+                            const callId = item.id;
+                            const mcpCall = currentMcpCalls.get(callId) || {};
+                            currentMcpCalls.set(callId, {
+                                type: 'mcp_call',
+                                name: item.name || mcpCall.name || 'unknown_tool',
+                                arguments: item.arguments || mcpCall.arguments || '',
+                                status: item.status || 'completed',
+                                output: item.output || mcpCall.output,
+                                error: item.error || mcpCall.error
+                            });
+                            this.updateStatus('connecting', 'Thinking...');
 
                         } else if (event.type === 'response.mcp_call.completed') {
-                            // MCP tool call completed
+                            // MCP tool call completed (legacy event)
                             const callId = event.item_id || event.call_id;
                             const mcpCall = currentMcpCalls.get(callId);
                             if (mcpCall) {
                                 mcpCall.status = 'completed';
-                                mcpCall.output = event.output;
+                                mcpCall.output = event.output || mcpCall.output;
                             }
                             this.updateStatus('connecting', 'Thinking...');
 
@@ -508,7 +538,7 @@ When in doubt: What would make this moment more exciting for the player?`;
                             const mcpCall = currentMcpCalls.get(callId);
                             if (mcpCall) {
                                 mcpCall.status = 'failed';
-                                mcpCall.error = event.error;
+                                mcpCall.error = event.error || mcpCall.error;
                             }
 
                         } else if (event.type === 'response.output_text.done') {
