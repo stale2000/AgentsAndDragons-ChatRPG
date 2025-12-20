@@ -192,14 +192,16 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
 
         // Extended Debugging
         if (Array.isArray(data.output)) {
-            console.log('📦 Output Array Types:', data.output.map(item => item.type));
+            // Log types for verification but keep it clean
+            const types = data.output.map(item => item.type);
+            console.log('📦 Output Array Types:', types);
         }
 
         // Extract assistant's response
         let responseText = null;
 
         if (Array.isArray(data.output)) {
-             // 1. Try standard Message format
+             // 1. Try standard Message format (OpenAI Responses API)
             const messageItem = data.output.find(item => item.type === 'message' || item.role === 'assistant');
             
             if (messageItem) {
@@ -207,8 +209,9 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
                     responseText = messageItem.content;
                 } else if (Array.isArray(messageItem.content)) {
                     responseText = messageItem.content
-                        .filter(part => part.type === 'text' || typeof part === 'string')
+                        .filter(part => part.type === 'text' || part.type === 'output_text' || typeof part === 'string')
                         .map(part => typeof part === 'string' ? part : part.text)
+                        .filter(text => text) // Filter out empty strings
                         .join('\n');
                 }
             }
@@ -216,7 +219,8 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
             // 2. Try looking for ANY item with 'text' or 'content' property if strict message check failed
             if (!responseText) {
                  const potentialContent = data.output.find(item => 
-                    item.type !== 'mcp_list_tools' && // Ignore the tool listing
+                    item.type !== 'mcp_list_tools' && 
+                    item.type !== 'reasoning' &&
                     (item.content || item.text || item.message)
                 );
                 
@@ -239,14 +243,12 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
             }
         }
 
-        // FAILURE MODE: Dump JSON to UI
         if (!responseText) {
-            console.warn('⚠️ Could not extract response text. Dumping raw data for user.');
-            const debugDump = JSON.stringify(data.output || data, null, 2);
-            responseText = `⚠️ **DEBUG: Parsing Failed**\n\nPlease copy this JSON and paste it to the developer:\n\n\`\`\`json\n${debugDump}\n\`\`\``;
+            console.warn('⚠️ Could not extract response text from:', JSON.stringify(data.output || data, null, 2));
+            responseText = 'No text response generated. (Check console for details)';
         }
 
-        console.log('📝 Extracted response text:', responseText ? responseText.slice(0, 50) + '...' : 'null');
+        console.log('📝 Extracted response text length:', responseText ? responseText.length : 0);
         return responseText;
     }
 
