@@ -170,6 +170,9 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
 
         const data = await response.json();
 
+        // DEBUG: Log full response to understand structure
+        console.log('🔍 Full API Response:', data);
+
         // Log cache performance metrics
         if (data.usage) {
             const promptDetails = data.usage.prompt_tokens_details || {};
@@ -187,8 +190,15 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
             });
         }
 
-        // Extract assistant's response using the new response format
-        return data.output_text || 'No response generated.';
+        // Extract assistant's response - try multiple possible fields
+        const responseText = data.output_text ||
+                            data.output ||
+                            data.choices?.[0]?.message?.content ||
+                            data.choices?.[0]?.text ||
+                            'No response generated.';
+
+        console.log('📝 Extracted response text:', responseText);
+        return responseText;
     }
 
     updateInputState() {
