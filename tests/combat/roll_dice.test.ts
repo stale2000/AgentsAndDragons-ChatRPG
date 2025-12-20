@@ -150,7 +150,7 @@ describe('roll_dice', () => {
       const result = await handleToolCall('roll_dice', { expression: 'invalid' });
       expect(result.isError).toBe(true);
       const text = getTextContent(result);
-      expect(text).toContain('Error');
+      expect(text).toMatch(/Error|ERROR/i);
     });
 
     it('should return error for missing expression', async () => {

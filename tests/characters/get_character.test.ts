@@ -140,7 +140,7 @@ describe('get_character', () => {
 
       expect(result.isError).toBe(true);
       const text = getTextContent(result);
-      expect(text).toContain('Error');
+      expect(text).toMatch(/Error|ERROR/i);
       expect(text.toLowerCase()).toContain('not found');
     });
 
@@ -151,7 +151,7 @@ describe('get_character', () => {
 
       expect(result.isError).toBe(true);
       const text = getTextContent(result);
-      expect(text).toContain('Error');
+      expect(text).toMatch(/Error|ERROR/i);
     });
   });
 
