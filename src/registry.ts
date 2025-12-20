@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tool Registry - Static Loading
  * All 50 tools are registered here at startup.
  */
@@ -41,7 +41,7 @@ export function success(markdown: string): CallToolResult {
 // Helper: Format error response
 export function error(message: string): CallToolResult {
   return {
-    content: [{ type: 'text', text: `❌ **Error:** ${message}` }],
+    content: [{ type: 'text', text: `[ERROR] ${message}` }],
     isError: true,
   };
 }
@@ -99,9 +99,9 @@ import {
   levelUpSchema
 } from './modules/characters.js';
 import { measureDistance, measureDistanceSchema, calculateAoe, calculateAoeSchema, checkLineOfSight, checkLineOfSightSchema, checkCover, checkCoverSchema, placeProp, placePropSchema, calculateMovement, calculateMovementSchema } from './modules/spatial.js';
-import { manageCondition, manageConditionSchema, createEncounter, createEncounterSchema, executeAction, executeActionSchema, advanceTurn, advanceTurnSchema, rollDeathSave, rollDeathSaveSchema, modifyTerrain, modifyTerrainSchema, renderBattlefield, renderBattlefieldSchema, getEncounter, getEncounterSchema, endEncounter, endEncounterSchema } from './modules/combat.js';
+import { manageCondition, manageConditionSchema, createEncounter, createEncounterSchema, executeAction, executeActionSchema, advanceTurn, advanceTurnSchema, rollDeathSave, rollDeathSaveSchema, modifyTerrain, modifyTerrainSchema, renderBattlefield, renderBattlefieldSchema, getEncounter, getEncounterSchema, endEncounter, endEncounterSchema, manageEncounter, manageEncounterSchema } from './modules/combat.js';
 import { manageConcentration, manageConcentrationSchema, manageAura, manageAuraSchema, useScroll, useScrollSchema, synthesizeSpell, synthesizeSpellSchema } from './modules/magic.js';
-import { manageLocation, manageLocationSchema, moveParty, movePartySchema, manageParty, managePartySchema } from './modules/data.js';
+import { manageLocation, manageLocationSchema, moveParty, movePartySchema, manageParty, managePartySchema, manageInventory, manageInventorySchema, manageNotes, manageNotesSchema, getSessionContext, getSessionContextSchema } from './modules/data.js';
 import { createBox, BOX } from './modules/ascii-art.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
@@ -251,7 +251,7 @@ export const toolRegistry: Record<string, ToolDefinition> = {
 
           content.push(`ROLLING ${results.length} DICE ${results.length === 1 ? 'EXPRESSION' : 'EXPRESSIONS'}`);
           content.push('');
-          content.push('─'.repeat(40));
+          content.push('Ã¢â€â‚¬'.repeat(40));
           content.push('');
 
           for (let i = 0; i < results.length; i++) {
@@ -272,7 +272,7 @@ export const toolRegistry: Record<string, ToolDefinition> = {
             content.push('');
           }
 
-          content.push('─'.repeat(40));
+          content.push('Ã¢â€â‚¬'.repeat(40));
           content.push('');
           content.push(`TOTAL ACROSS ALL ROLLS: ${results.reduce((sum, r) => sum + r.total, 0)}`);
 
@@ -466,7 +466,7 @@ export const toolRegistry: Record<string, ToolDefinition> = {
 
   level_up: {
     name: 'level_up',
-    description: 'Level up a character. Increases level, HP (roll/average/max/manual), proficiency bonus, and spell slots. Supports custom class hit dice and resource scaling. Multi-level jumps allowed (e.g., 1→5). Batch support for party level-ups. Optionally track new features and spells learned.',
+    description: 'Level up a character. Increases level, HP (roll/average/max/manual), proficiency bonus, and spell slots. Supports custom class hit dice and resource scaling. Multi-level jumps allowed (e.g., 1Ã¢â€ â€™5). Batch support for party level-ups. Optionally track new features and spells learned.',
     inputSchema: toJsonSchema(levelUpSchema),
     handler: async (args) => {
       try {
@@ -814,6 +814,26 @@ export const toolRegistry: Record<string, ToolDefinition> = {
     },
   },
 
+
+  manage_encounter: {
+    name: 'manage_encounter',
+    description: 'Composite tool for encounter management with state synchronization. Operations: create (with characterId linking), get (with verbosity), end (with participantUpdates), commit (sync to persistent characters), list (active encounters). Supports bridging encounter simulation state with persistent character records.',
+    inputSchema: toJsonSchema(manageEncounterSchema),
+    handler: async (args) => {
+      try {
+        const validated = manageEncounterSchema.parse(args);
+        const result = manageEncounter(validated);
+        return success(result);
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          const messages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+          return error(`Validation failed: ${messages}`);
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return error(message);
+      }
+    },
+  },
   manage_concentration: {
     name: 'manage_concentration',
     description: 'Manage D&D 5e concentration on spells. Operations: set (begin concentrating), get (query state), check (roll save after damage), break (end concentration). DC = max(10, damage/2). Supports advantage/disadvantage on saves.',
@@ -876,7 +896,7 @@ export const toolRegistry: Record<string, ToolDefinition> = {
 
   synthesize_spell: {
     name: 'synthesize_spell',
-    description: 'Arcane Synthesis for improvised magic. Caster proposes a custom spell effect; Arcana check DC = 10 + (level × 2) + modifiers. Success creates temporary spell effect, failure may cause mishaps. Supports circumstance modifiers (ley lines, desperation, material components).',
+    description: 'Arcane Synthesis for improvised magic. Caster proposes a custom spell effect; Arcana check DC = 10 + (level Ãƒâ€” 2) + modifiers. Success creates temporary spell effect, failure may cause mishaps. Supports circumstance modifiers (ley lines, desperation, material components).',
     inputSchema: toJsonSchema(synthesizeSpellSchema),
     handler: async (args) => {
       try {
@@ -932,6 +952,25 @@ export const toolRegistry: Record<string, ToolDefinition> = {
     },
   },
 
+  manage_inventory: {
+    name: 'manage_inventory',
+    description: 'Manage character inventory. Operations: give (add items), take (remove items), equip (equip to slot), unequip (remove from slot), move (change container), list (show inventory), transfer (move between characters).',
+    inputSchema: toJsonSchema(manageInventorySchema),
+    handler: async (args) => {
+      try {
+        const result = await manageInventory(args);
+        return result;
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          const messages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+          return error(`Validation failed: ${messages}`);
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return error(message);
+      }
+    },
+  },
+
   manage_party: {
     name: 'manage_party',
     description: 'Manage party composition. Operations: add (add character to party with optional role), remove (remove character from party), list (show party roster), get (get party member details), set_role (assign role to party member), clear (remove all members). Roles: leader, scout, healer, tank, support, damage, utility, other.',
@@ -939,6 +978,44 @@ export const toolRegistry: Record<string, ToolDefinition> = {
     handler: async (args) => {
       try {
         const result = await manageParty(args);
+        return result;
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          const messages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+          return error(`Validation failed: ${messages}`);
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return error(message);
+      }
+    },
+  },
+
+  manage_notes: {
+    name: 'manage_notes',
+    description: 'Manage session notes. Operations: add (add note with content/tags/importance), search (search by query/tagFilter), get (get by noteId), delete (remove by noteId), list (list recent with limit).',
+    inputSchema: toJsonSchema(manageNotesSchema),
+    handler: async (args) => {
+      try {
+        const result = await manageNotes(args);
+        return result;
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          const messages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+          return error(`Validation failed: ${messages}`);
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return error(message);
+      }
+    },
+  },
+
+  get_session_context: {
+    name: 'get_session_context',
+    description: 'Get comprehensive session context snapshot. Includes location, party, notes, combat state, and summary. Options: include (array of sections), format (detailed|compact|brief), maxNotes (limit), includeTimestamps (boolean).',
+    inputSchema: toJsonSchema(getSessionContextSchema),
+    handler: async (args) => {
+      try {
+        const result = await getSessionContext(args);
         return result;
       } catch (err) {
         if (err instanceof z.ZodError) {

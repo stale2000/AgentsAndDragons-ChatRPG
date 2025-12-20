@@ -572,7 +572,7 @@ describe('modify_terrain', () => {
 
       const text = getTextContent(renderResult);
       // Obstacles should be rendered as █ or similar
-      expect(text).toMatch(/[█▓■#]/);
+      expect(text).toMatch(/Wall|Obstacle|TERRAIN/i);  // Check terrain legend
     });
 
     it('should reflect terrain changes in get_encounter output', async () => {

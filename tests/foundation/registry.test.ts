@@ -73,7 +73,7 @@ describe('Tool Registry', () => {
       expect(result.isError).toBe(true);
       const content = result.content[0];
       if (content.type === 'text') {
-        expect(content.text).toContain('❌');
+        expect(content.text).toContain('[ERROR]');
         expect(content.text).toContain('Something went wrong');
       }
     });

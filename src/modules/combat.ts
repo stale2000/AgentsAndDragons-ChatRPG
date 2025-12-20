@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Combat Module - Condition Management & Encounters
  * Handles D&D 5e conditions with duration tracking and encounter management
  */
@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { ConditionSchema, AbilitySchema, PositionSchema, SizeSchema, DamageTypeSchema, LightSchema, type Condition, type Ability } from '../types.js';
 import { createBox, centerText, padText, BOX, createStatusBar } from './ascii-art.js';
 import { broadcastToEncounter } from '../websocket.js';
+import { getSpellSlotDataForCharacter } from './characters.js';
 
 // Use AppData for persistent character storage (cross-session persistence)
 const getDataDir = () => {
@@ -38,6 +39,7 @@ const singleConditionSchema = z.object({
   // For add/remove
   condition: ConditionSchema.optional(),
   source: z.string().optional(),
+  description: z.string().optional(), // Custom description for the condition
   duration: z.union([
     z.number(), // Rounds
     z.literal('concentration'),
@@ -318,7 +320,7 @@ export function calculateEffectiveStats(characterId: string, baseStats: {
       const condName = cond.condition === 'exhaustion'
         ? `Exhaustion ${cond.exhaustionLevel}`
         : String(cond.condition).charAt(0).toUpperCase() + String(cond.condition).slice(1);
-      result.conditionEffects.push(`${condName}: HP max ×${effects.maxHpMultiplier}`);
+      result.conditionEffects.push(`${condName}: HP max Ãƒâ€”${effects.maxHpMultiplier}`);
     }
     if (effects.maxHpModifier !== undefined) {
       result.maxHp.effective += effects.maxHpModifier;
@@ -333,7 +335,7 @@ export function calculateEffectiveStats(characterId: string, baseStats: {
       const condName = cond.condition === 'exhaustion'
         ? `Exhaustion ${cond.exhaustionLevel}`
         : String(cond.condition).charAt(0).toUpperCase() + String(cond.condition).slice(1);
-      result.conditionEffects.push(`${condName}: Speed ×${effects.speedMultiplier}`);
+      result.conditionEffects.push(`${condName}: Speed Ãƒâ€”${effects.speedMultiplier}`);
     }
     if (effects.speedModifier !== undefined) {
       result.speed.effective += effects.speedModifier;
@@ -459,13 +461,13 @@ function formatBatchResults(results: Array<{
     // Special formatting for query batch - show full details
     content.push(centerText(`CONDITION STATUS - ${results.length} CHARACTERS`, 68));
     content.push('');
-    content.push('═'.repeat(68));
+    content.push('Ã¢â€¢Â'.repeat(68));
 
     for (const result of results) {
       content.push('');
       const displayName = result.targetName || result.targetId;
       content.push(centerText(displayName.toUpperCase(), 68));
-      content.push('─'.repeat(68));
+      content.push('Ã¢â€â‚¬'.repeat(68));
 
       if (result.success && result.queryResult) {
         // Extract just the condition details from the query result
@@ -473,7 +475,7 @@ function formatBatchResults(results: Array<{
         const lines = result.queryResult.split('\n');
         // Find lines that contain actual condition info (skip the box borders)
         const relevantLines = lines.filter(line => {
-          return line.trim() && !line.match(/^[╔╗╚╝║═─┌┐└┘│]+$/) && !line.includes('CONDITION STATUS');
+          return line.trim() && !line.match(/^[Ã¢â€¢â€Ã¢â€¢â€”Ã¢â€¢Å¡Ã¢â€¢ÂÃ¢â€¢â€˜Ã¢â€¢ÂÃ¢â€â‚¬Ã¢â€Å’Ã¢â€ÂÃ¢â€â€Ã¢â€ËœÃ¢â€â€š]+$/) && !line.includes('CONDITION STATUS');
         });
 
         for (const line of relevantLines) {
@@ -487,21 +489,21 @@ function formatBatchResults(results: Array<{
       content.push('');
     }
 
-    content.push('═'.repeat(68));
+    content.push('Ã¢â€¢Â'.repeat(68));
     return createBox('BATCH CONDITION QUERY', content, undefined, 'HEAVY');
   }
 
   // Standard batch operation formatting (add/remove/tick)
   content.push(centerText(`PROCESSED ${results.length} OPERATIONS`, 68));
   content.push('');
-  content.push('─'.repeat(68));
+  content.push('Ã¢â€â‚¬'.repeat(68));
   content.push('');
 
   const successCount = results.filter(r => r.success).length;
   const failCount = results.length - successCount;
 
   for (const result of results) {
-    const status = result.success ? '✓' : '✗';
+    const status = result.success ? 'Ã¢Å“â€œ' : 'Ã¢Å“â€”';
     const displayName = result.targetName || result.targetId;
     const opDesc = result.condition
       ? `${result.operation} ${result.condition}`
@@ -514,7 +516,7 @@ function formatBatchResults(results: Array<{
   }
 
   content.push('');
-  content.push('─'.repeat(68));
+  content.push('Ã¢â€â‚¬'.repeat(68));
   content.push('');
   content.push(padText(`Success: ${successCount} | Failed: ${failCount}`, 68, 'left'));
 
@@ -551,6 +553,7 @@ function handleAddCondition(targetId: string, input: ManageConditionInput): stri
   // Create new condition
   const newCondition: ActiveCondition = {
     condition: input.condition,
+    description: input.description,
     source: input.source,
     duration: input.duration,
     saveDC: input.saveDC,
@@ -573,6 +576,20 @@ function handleAddCondition(targetId: string, input: ManageConditionInput): stri
       condition: input.condition,
       duration: typeof input.duration === 'number' ? input.duration : undefined,
     });
+
+    // Track condition on participant for state sync (ADR-005)
+    const encounter = encounterStore.get(input.encounterId);
+    if (encounter) {
+      const participant = encounter.participants.find(p => p.id === targetId);
+      if (participant) {
+        if (!participant.conditionsApplied) {
+          participant.conditionsApplied = [];
+        }
+        if (!participant.conditionsApplied.includes(input.condition)) {
+          participant.conditionsApplied.push(input.condition);
+        }
+      }
+    }
   }
 
   return formatConditionUpdate(targetId, input.condition, 'added', newCondition);
@@ -611,11 +628,31 @@ function handleAddExhaustion(
 // ============================================================
 
 function handleRemoveCondition(targetId: string, input: ManageConditionInput): string {
-  const conditions = conditionStore.get(targetId) || [];
+  // First check conditions on the targetId directly
+  let conditions = conditionStore.get(targetId) || [];
+  let effectiveTargetId = targetId;
+
+  // If in encounter context, also check if targetId is a participantId with a linked characterId
+  if (input.encounterId) {
+    const encounter = encounterStore.get(input.encounterId);
+    if (encounter) {
+      const participant = encounter.participants.find(p => p.id === targetId);
+      if (participant?.characterId) {
+        // Check if the condition exists under the characterId
+        const charConditions = conditionStore.get(participant.characterId) || [];
+        const conditionOnChar = charConditions.findIndex(c => c.condition === input.condition);
+        if (conditionOnChar !== -1 && conditions.findIndex(c => c.condition === input.condition) === -1) {
+          // The condition is on characterId, not participantId
+          conditions = charConditions;
+          effectiveTargetId = participant.characterId;
+        }
+      }
+    }
+  }
 
   // Special handling for "all"
   if (input.condition === 'all' as any) {
-    conditionStore.set(targetId, []);
+    conditionStore.set(effectiveTargetId, []);
     const content: string[] = [];
     content.push(centerText(`TARGET: ${targetId}`, 58));
     content.push('');
@@ -629,7 +666,7 @@ function handleRemoveCondition(targetId: string, input: ManageConditionInput): s
 
   // Handle exhaustion specially
   if (input.condition === 'exhaustion') {
-    return handleRemoveExhaustion(targetId, conditions, input);
+    return handleRemoveExhaustion(effectiveTargetId, conditions, input);
   }
 
   const index = conditions.findIndex(c => c.condition === input.condition);
@@ -643,7 +680,7 @@ function handleRemoveCondition(targetId: string, input: ManageConditionInput): s
   }
 
   const removed = conditions.splice(index, 1)[0];
-  conditionStore.set(targetId, conditions);
+  conditionStore.set(effectiveTargetId, conditions);
 
   // Broadcast condition removed if in an encounter context
   if (input.encounterId) {
@@ -922,6 +959,8 @@ const ParticipantSchema = z.object({
   immunities: z.array(DamageTypeSchema).optional(),
   vulnerabilities: z.array(DamageTypeSchema).optional(),
   conditionImmunities: z.array(ConditionSchema).optional(),
+  // ADR-005: Link to persistent character for state synchronization
+  characterId: z.string().optional().describe('Links participant to persistent character for state sync'),
 });
 
 // Terrain Schema
@@ -1088,19 +1127,19 @@ function formatEncounterCreated(encounter: EncounterState): string {
   content.push(centerText(`Round: ${encounter.round} | Lighting: ${encounter.lighting}`, WIDTH));
   content.push(centerText(`${encounter.participants.length} Participants`, WIDTH));
   content.push('');
-  content.push('═'.repeat(WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(WIDTH));
   content.push('');
 
   // Initiative Order
   content.push(centerText('INITIATIVE ORDER', WIDTH));
   content.push('');
-  content.push('─'.repeat(WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(WIDTH));
   content.push('');
 
   // Table header - widened position column to 14 chars to fit "(100, 100) 50ft"
   const header = ' #  | Name                | Init | HP          | AC | Position      ';
   content.push(header);
-  content.push('─'.repeat(WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(WIDTH));
 
   // Participants
   for (let i = 0; i < encounter.participants.length; i++) {
@@ -1136,7 +1175,7 @@ function formatEncounterCreated(encounter: EncounterState): string {
   content.push('');
   
   // Initiative summary for each participant (helps with test regex matching)
-  content.push('─'.repeat(WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(WIDTH));
   content.push('');
   for (const p of encounter.participants) {
     const surprised = p.surprised ? ' (SURPRISED)' : '';
@@ -1145,7 +1184,7 @@ function formatEncounterCreated(encounter: EncounterState): string {
   }
   
   content.push('');
-  content.push('═'.repeat(WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(WIDTH));
   content.push('');
 
   // Terrain info
@@ -1204,9 +1243,9 @@ const HP_BAR_WIDTH = {
 
 /** Lighting display with icons */
 const LIGHTING_DISPLAY: Record<string, string> = {
-  bright: '☀️ Bright Light',
-  dim: '🌙 Dim Light',
-  darkness: '⚫ Darkness',
+  bright: 'Ã¢Ëœâ‚¬Ã¯Â¸Â Bright Light',
+  dim: 'Ã°Å¸Å’â„¢ Dim Light',
+  darkness: 'Ã¢Å¡Â« Darkness',
 };
 
 /** Type for participant with initiative (encounter context) */
@@ -1220,13 +1259,13 @@ type EncounterParticipant = Participant & { initiative: number };
  * Get status indicator emoji based on HP percentage.
  * @param hp - Current HP
  * @param maxHp - Maximum HP
- * @returns Status emoji: 💀 (dead), ⚠ (bloodied), ✓ (full), or empty
+ * @returns Status emoji: Ã°Å¸â€™â‚¬ (dead), Ã¢Å¡Â  (bloodied), Ã¢Å“â€œ (full), or empty
  */
 function getStatusIndicator(hp: number, maxHp: number): string {
-  if (hp === 0) return ' 💀';
+  if (hp === 0) return ' Ã°Å¸â€™â‚¬';
   const percent = Math.round((hp / maxHp) * 100);
-  if (percent <= 25) return ' ⚠';
-  if (percent >= 100) return ' ✓';
+  if (percent <= 25) return ' Ã¢Å¡Â ';
+  if (percent >= 100) return ' Ã¢Å“â€œ';
   return '';
 }
 
@@ -1235,12 +1274,12 @@ function getStatusIndicator(hp: number, maxHp: number): string {
  * @param current - Current HP
  * @param max - Maximum HP  
  * @param width - Bar width in characters
- * @returns HP bar string like "████░░░░"
+ * @returns HP bar string like "Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜"
  */
 function createMiniHpBar(current: number, max: number, width: number): string {
   const percent = Math.max(0, Math.min(1, current / max));
   const filled = Math.round(percent * width);
-  return '█'.repeat(filled) + '░'.repeat(width - filled);
+  return 'Ã¢â€“Ë†'.repeat(filled) + 'Ã¢â€“â€˜'.repeat(width - filled);
 }
 
 /**
@@ -1252,17 +1291,17 @@ function createMiniHpBar(current: number, max: number, width: number): string {
 function formatDeathSaveDisplay(encounterId: string, characterId: string): string | null {
   const deathState = getDeathSaveState(encounterId, characterId);
   if (!deathState) {
-    return '💀 DYING - needs death save!';
+    return 'Ã°Å¸â€™â‚¬ DYING - needs death save!';
   }
   
-  const successMarkers = '●'.repeat(deathState.successes) + '○'.repeat(3 - deathState.successes);
-  const failMarkers = '✕'.repeat(deathState.failures) + '○'.repeat(3 - deathState.failures);
+  const successMarkers = 'Ã¢â€”Â'.repeat(deathState.successes) + 'Ã¢â€”â€¹'.repeat(3 - deathState.successes);
+  const failMarkers = 'Ã¢Å“â€¢'.repeat(deathState.failures) + 'Ã¢â€”â€¹'.repeat(3 - deathState.failures);
   
   let status = '';
   if (deathState.isStable) status = ' (STABLE)';
   if (deathState.isDead) status = ' (DEAD)';
   
-  return `💀 Saves: ${successMarkers} | Fails: ${failMarkers}${status}`;
+  return `Ã°Å¸â€™â‚¬ Saves: ${successMarkers} | Fails: ${failMarkers}${status}`;
 }
 
 // ============================================================
@@ -1345,7 +1384,7 @@ function formatEndedEncounter(encounter: EncounterState): string {
   content.push('FINAL STATE:');
   
   for (const p of encounter.participants) {
-    const marker = p.hp > 0 ? '✓' : '✗';
+    const marker = p.hp > 0 ? 'Ã¢Å“â€œ' : 'Ã¢Å“â€”';
     const status = p.hp > 0 ? 'ALIVE' : 'DEAD';
     if (p.hp > 0) {
       content.push(`  ${marker} ${p.name} - ${status} (${p.hp}/${p.maxHp} HP)`);
@@ -1400,13 +1439,13 @@ function formatEncounterSummary(
   
   // Header info
   content.push(padText(`Encounter: ${encounter.id}`, ENCOUNTER_WIDTH, 'left'));
-  content.push(padText(`Round ${encounter.round} • ${current.name}'s Turn`, ENCOUNTER_WIDTH, 'left'));
+  content.push(padText(`Round ${encounter.round} Ã¢â‚¬Â¢ ${current.name}'s Turn`, ENCOUNTER_WIDTH, 'left'));
   content.push('');
   
   // Participant summary with HP bars
-  content.push('─'.repeat(ENCOUNTER_WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
   content.push(centerText(`COMBATANTS (${encounter.participants.length})`, ENCOUNTER_WIDTH));
-  content.push('─'.repeat(ENCOUNTER_WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
   
   for (const p of encounter.participants) {
     const maxHp = p.maxHp || p.hp;
@@ -1414,7 +1453,7 @@ function formatEncounterSummary(
     const hpBar = createMiniHpBar(p.hp, maxHp, HP_BAR_WIDTH.SUMMARY);
     
     // Mark current turn with arrow
-    const turnMarker = p.id === current.id ? '▶ ' : '  ';
+    const turnMarker = p.id === current.id ? 'Ã¢â€“Â¶ ' : '  ';
     const status = getStatusIndicator(p.hp, maxHp);
     
     const line = `${turnMarker}${p.name}: [${hpBar}] ${hpPercent}%${status}`;
@@ -1436,22 +1475,22 @@ function formatEncounterStandard(
   
   // Header with key info - no padding, let box auto-size
   content.push(`Encounter: ${encounter.id}`);
-  content.push(`Round ${encounter.round} • Turn ${encounter.currentTurnIndex + 1}/${encounter.participants.length}`);
+  content.push(`Round ${encounter.round} Ã¢â‚¬Â¢ Turn ${encounter.currentTurnIndex + 1}/${encounter.participants.length}`);
   content.push('');
   
   // Current turn highlight
-  content.push('═'.repeat(ENCOUNTER_WIDTH));
-  content.push(centerText(`▶ ${current.name}'s Turn ◀`, ENCOUNTER_WIDTH));
-  content.push('═'.repeat(ENCOUNTER_WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
+  content.push(centerText(`Ã¢â€“Â¶ ${current.name}'s Turn Ã¢â€”â‚¬`, ENCOUNTER_WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
   content.push('');
   
   // Initiative order with full stats
   content.push('INITIATIVE ORDER:');
-  content.push('─'.repeat(ENCOUNTER_WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
   
   // Column headers
   content.push('  # Name            Init  HP        AC  Conditions');
-  content.push('─'.repeat(ENCOUNTER_WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
   
   for (let i = 0; i < encounter.participants.length; i++) {
     const p = encounter.participants[i];
@@ -1459,7 +1498,7 @@ function formatEncounterStandard(
     const isCurrent = i === encounter.currentTurnIndex;
     
     // Turn indicator
-    const marker = isCurrent ? '▶' : ' ';
+    const marker = isCurrent ? 'Ã¢â€“Â¶' : ' ';
     
     // Format columns
     const order = String(i + 1).padStart(2);
@@ -1480,7 +1519,7 @@ function formatEncounterStandard(
     
     // Show position if available
     if (p.position) {
-      content.push(`      📍 (${p.position.x}, ${p.position.y})${p.position.z ? ` ${p.position.z}ft up` : ''}`);
+      content.push(`      Ã°Å¸â€œÂ (${p.position.x}, ${p.position.y})${p.position.z ? ` ${p.position.z}ft up` : ''}`);
     }
     
     // Show death save state if at 0 HP
@@ -1503,7 +1542,7 @@ function formatEncounterStandard(
     if (hasTerrain) {
       content.push('');
       content.push('TERRAIN:');
-      content.push('─'.repeat(ENCOUNTER_WIDTH));
+      content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
       
       if (t.obstacles && t.obstacles.length > 0) {
         content.push(`  obstacles: ${t.obstacles.join(', ')}`);
@@ -1535,13 +1574,13 @@ function formatEncounterDetailed(
   
   // Header with all metadata
   content.push(padText(`Encounter: ${encounter.id}`, ENCOUNTER_WIDTH, 'left'));
-  content.push(padText(`Round ${encounter.round} • Turn ${encounter.currentTurnIndex + 1}/${encounter.participants.length}`, ENCOUNTER_WIDTH, 'left'));
+  content.push(padText(`Round ${encounter.round} Ã¢â‚¬Â¢ Turn ${encounter.currentTurnIndex + 1}/${encounter.participants.length}`, ENCOUNTER_WIDTH, 'left'));
   content.push('');
   
   // Environment section
-  content.push('═'.repeat(ENCOUNTER_WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
   content.push(centerText('ENVIRONMENT', ENCOUNTER_WIDTH));
-  content.push('═'.repeat(ENCOUNTER_WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
   
   // Lighting - use shared constant
   content.push(padText(`Lighting: ${LIGHTING_DISPLAY[encounter.lighting] || encounter.lighting}`, ENCOUNTER_WIDTH, 'left'));
@@ -1570,24 +1609,24 @@ function formatEncounterDetailed(
   content.push('');
   
   // Current turn highlight
-  content.push('═'.repeat(ENCOUNTER_WIDTH));
-  content.push(centerText(`▶ ${current.name}'s Turn ◀`, ENCOUNTER_WIDTH));
-  content.push('═'.repeat(ENCOUNTER_WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
+  content.push(centerText(`Ã¢â€“Â¶ ${current.name}'s Turn Ã¢â€”â‚¬`, ENCOUNTER_WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
   content.push('');
   
   // Detailed participant list
   content.push(padText('COMBATANTS:', ENCOUNTER_WIDTH, 'left'));
-  content.push('─'.repeat(ENCOUNTER_WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
   
   for (let i = 0; i < encounter.participants.length; i++) {
     const p = encounter.participants[i];
     const maxHp = p.maxHp || p.hp;
     const isCurrent = i === encounter.currentTurnIndex;
     
-    // Name header with turn indicator
-    const marker = isCurrent ? '▶' : ' ';
-    content.push(padText(`${marker} ${i + 1}. ${p.name}`, ENCOUNTER_WIDTH, 'left'));
-    
+    // Name header with turn indicator and persistence marker (ADR-005)
+    const marker = isCurrent ? String.fromCodePoint(0x25B6) : ' ';
+    const persistMarker = (p as any).characterId ? '(persistent)' : '(ephemeral)';
+    content.push(padText(`${marker} ${i + 1}. ${p.name} ${persistMarker}`, ENCOUNTER_WIDTH, 'left'));
     // Stats line - use HP_BAR_WIDTH constant
     const hpBar = createMiniHpBar(p.hp, maxHp, HP_BAR_WIDTH.DETAILED);
     content.push(padText(`   HP: ${hpBar} ${p.hp}/${maxHp}  AC: ${p.ac}  Init: ${p.initiative}`, ENCOUNTER_WIDTH, 'left'));
@@ -1617,7 +1656,7 @@ function formatEncounterDetailed(
     if (conditions.length > 0) {
       content.push(padText('   Conditions:', ENCOUNTER_WIDTH, 'left'));
       for (const c of conditions) {
-        let condLine = `     • ${c.condition}`;
+        let condLine = `     Ã¢â‚¬Â¢ ${c.condition}`;
         if (c.duration && typeof c.duration === 'number') condLine += ` (${c.duration} rounds)`;
         else if (c.duration) condLine += ` (${c.duration})`;
         if (c.source) condLine += ` [${c.source}]`;
@@ -1887,16 +1926,16 @@ function handleAttackAction(
   let damageRolls: number[] = [];
   let damageDescription = '';
 
-  if (isHit && input.damageExpression) {
+  if (isHit && (input.damageExpression || input.manualDamageRoll !== undefined)) {
     if (input.manualDamageRoll !== undefined) {
       damage = input.manualDamageRoll;
       damageDescription = `${damage} (manual)`;
-    } else {
+    } else if (input.damageExpression) {
       // Parse and roll damage
       const diceResult = parseDice(input.damageExpression);
       damage = diceResult.total;
       damageRolls = diceResult.rolls;
-      
+
       // Double dice on critical hit (roll again and add)
       if (isCritical) {
         const critBonus = parseDice(input.damageExpression.replace(/[+-]\d+$/, '')); // Remove modifier for crit
@@ -1913,6 +1952,14 @@ function handleAttackAction(
   let oldHp = target.hp;
   if (isHit && damage > 0) {
     target.hp = Math.max(0, target.hp - damage);
+  }
+
+  // Track combat statistics on attacker (ADR-005: State Sync)
+  const actorWithStats = actor as typeof actor & { damageDealt?: number; attacksMade?: number; attacksHit?: number };
+  actorWithStats.attacksMade = (actorWithStats.attacksMade || 0) + 1;
+  if (isHit) {
+    actorWithStats.attacksHit = (actorWithStats.attacksHit || 0) + 1;
+    actorWithStats.damageDealt = (actorWithStats.damageDealt || 0) + damage;
   }
 
   // Broadcast attack result
@@ -1991,26 +2038,26 @@ function handleDashAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} DASHES!`, 50));
   content.push('');
-  content.push('─'.repeat(50));
+  content.push('Ã¢â€â‚¬'.repeat(50));
   content.push('');
-  content.push(centerText(`Movement: ${actor.speed}ft → ${actor.speed * 2}ft`, 50));
+  content.push(centerText(`Movement: ${actor.speed}ft Ã¢â€ â€™ ${actor.speed * 2}ft`, 50));
   content.push(centerText('(Doubled for this turn)', 50));
   content.push('');
-  content.push('─'.repeat(50));
+  content.push('Ã¢â€â‚¬'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
 
   // Handle movement if specified
   if (input.moveTo) {
     content.push('');
-    content.push('═'.repeat(50));
+    content.push('Ã¢â€¢Â'.repeat(50));
     content.push('');
     
     // Check for opportunity attacks
     const oaResults = checkOpportunityAttacks(encounter, actor, input.moveTo, tracker.disengagedThisTurn);
     
     for (const oa of oaResults) {
-      content.push(centerText(`⚔ OPPORTUNITY ATTACK ⚔`, 50));
+      content.push(centerText(`Ã¢Å¡â€ OPPORTUNITY ATTACK Ã¢Å¡â€`, 50));
       content.push(centerText(`${oa.attackerName} attacks!`, 50));
       content.push(centerText(oa.result, 50));
       content.push('');
@@ -2181,16 +2228,16 @@ function formatAttackResult(
   // Header
   content.push(centerText(`${attackerName} ATTACKS ${targetName}`, WIDTH));
   content.push('');
-  content.push('═'.repeat(WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(WIDTH));
   content.push('');
 
   // Roll info
   if (advantage) {
-    content.push(centerText('⚔ ATTACK ROLL (ADVANTAGE) ⚔', WIDTH));
+    content.push(centerText('Ã¢Å¡â€ ATTACK ROLL (ADVANTAGE) Ã¢Å¡â€', WIDTH));
   } else if (disadvantage) {
-    content.push(centerText('⚔ ATTACK ROLL (DISADVANTAGE) ⚔', WIDTH));
+    content.push(centerText('Ã¢Å¡â€ ATTACK ROLL (DISADVANTAGE) Ã¢Å¡â€', WIDTH));
   } else {
-    content.push(centerText('⚔ ATTACK ROLL ⚔', WIDTH));
+    content.push(centerText('Ã¢Å¡â€ ATTACK ROLL Ã¢Å¡â€', WIDTH));
   }
   content.push('');
   content.push(centerText(`Roll: ${rollDescription}`, WIDTH));
@@ -2199,17 +2246,17 @@ function formatAttackResult(
 
   // Result
   if (isCritical) {
-    content.push(centerText('★★★ CRITICAL HIT! ★★★', WIDTH));
+    content.push(centerText('Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦ CRITICAL HIT! Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦', WIDTH));
   } else if (isNat1) {
-    content.push(centerText('✗ CRITICAL MISS ✗', WIDTH));
+    content.push(centerText('Ã¢Å“â€” CRITICAL MISS Ã¢Å“â€”', WIDTH));
   } else if (isHit) {
-    content.push(centerText('✓ HIT ✓', WIDTH));
+    content.push(centerText('Ã¢Å“â€œ HIT Ã¢Å“â€œ', WIDTH));
   } else {
-    content.push(centerText('✗ MISS ✗', WIDTH));
+    content.push(centerText('Ã¢Å“â€” MISS Ã¢Å“â€”', WIDTH));
   }
 
   content.push('');
-  content.push('─'.repeat(WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(WIDTH));
   content.push('');
 
   // Damage (if hit)
@@ -2221,27 +2268,27 @@ function formatAttackResult(
 
     // HP bar
     const hpPercent = Math.floor((newHp / maxHp) * 20);
-    const hpBar = '█'.repeat(hpPercent) + '░'.repeat(20 - hpPercent);
-    content.push(centerText(`${targetName}: ${oldHp} → ${newHp}/${maxHp} HP`, WIDTH));
+    const hpBar = 'Ã¢â€“Ë†'.repeat(hpPercent) + 'Ã¢â€“â€˜'.repeat(20 - hpPercent);
+    content.push(centerText(`${targetName}: ${oldHp} Ã¢â€ â€™ ${newHp}/${maxHp} HP`, WIDTH));
     content.push(centerText(`[${hpBar}]`, WIDTH));
 
     if (newHp === 0) {
       content.push('');
-      content.push(centerText('☠ TARGET DOWN ☠', WIDTH));
+      content.push(centerText('Ã¢ËœÂ  TARGET DOWN Ã¢ËœÂ ', WIDTH));
     }
   }
 
   // Movement (if any)
   if (movementInfo) {
     content.push('');
-    content.push('─'.repeat(WIDTH));
+    content.push('Ã¢â€â‚¬'.repeat(WIDTH));
     content.push('');
     content.push(padText(`Movement: ${movementInfo}`, WIDTH, 'left'));
   }
 
   // Footer
   content.push('');
-  content.push('═'.repeat(WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(WIDTH));
   content.push('');
   content.push(padText(`Action Cost: ${actionCost}`, WIDTH, 'left'));
 
@@ -2263,12 +2310,12 @@ function handleDisengageAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} DISENGAGES!`, 50));
   content.push('');
-  content.push('─'.repeat(50));
+  content.push('Ã¢â€â‚¬'.repeat(50));
   content.push('');
   content.push(centerText('Movement will not provoke', 50));
   content.push(centerText('opportunity attacks this turn', 50));
   content.push('');
-  content.push('─'.repeat(50));
+  content.push('Ã¢â€â‚¬'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
 
@@ -2286,13 +2333,13 @@ function handleDodgeAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} DODGES!`, 50));
   content.push('');
-  content.push('─'.repeat(50));
+  content.push('Ã¢â€â‚¬'.repeat(50));
   content.push('');
   content.push(centerText('Until next turn:', 50));
-  content.push(centerText('• Attacks against you have DISADVANTAGE', 50));
-  content.push(centerText('• DEX saves have ADVANTAGE', 50));
+  content.push(centerText('Ã¢â‚¬Â¢ Attacks against you have DISADVANTAGE', 50));
+  content.push(centerText('Ã¢â‚¬Â¢ DEX saves have ADVANTAGE', 50));
   content.push('');
-  content.push('─'.repeat(50));
+  content.push('Ã¢â€â‚¬'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
 
@@ -2322,7 +2369,7 @@ function handleGrappleAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} GRAPPLES ${target.name.toUpperCase()}`, 50));
   content.push('');
-  content.push('═'.repeat(50));
+  content.push('Ã¢â€¢Â'.repeat(50));
   content.push('');
   content.push(centerText('CONTESTED ATHLETICS CHECK', 50));
   content.push('');
@@ -2331,19 +2378,19 @@ function handleGrappleAction(
   content.push('');
 
   if (success) {
-    content.push(centerText('✓ GRAPPLE SUCCESS! ✓', 50));
+    content.push(centerText('Ã¢Å“â€œ GRAPPLE SUCCESS! Ã¢Å“â€œ', 50));
     content.push('');
     content.push(centerText(`${target.name} is now GRAPPLED`, 50));
     content.push(centerText('(Speed 0, can attempt escape)', 50));
     // Apply grappled condition would go here via manage_condition
   } else {
-    content.push(centerText('✗ GRAPPLE FAILED ✗', 50));
+    content.push(centerText('Ã¢Å“â€” GRAPPLE FAILED Ã¢Å“â€”', 50));
     content.push('');
     content.push(centerText(`${target.name} breaks free!`, 50));
   }
 
   content.push('');
-  content.push('═'.repeat(50));
+  content.push('Ã¢â€¢Â'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
 
@@ -2375,7 +2422,7 @@ function handleShoveAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} SHOVES ${target.name.toUpperCase()}`, 50));
   content.push('');
-  content.push('═'.repeat(50));
+  content.push('Ã¢â€¢Â'.repeat(50));
   content.push('');
   content.push(centerText('CONTESTED ATHLETICS CHECK', 50));
   content.push('');
@@ -2385,7 +2432,7 @@ function handleShoveAction(
 
   if (success) {
     if (shoveDirection === 'prone') {
-      content.push(centerText('✓ SHOVE SUCCESS! ✓', 50));
+      content.push(centerText('Ã¢Å“â€œ SHOVE SUCCESS! Ã¢Å“â€œ', 50));
       content.push('');
       content.push(centerText(`${target.name} is knocked PRONE`, 50));
       // Apply prone condition would go here
@@ -2401,19 +2448,19 @@ function handleShoveAction(
         target.position.y += Math.sign(dy);
       }
 
-      content.push(centerText('✓ SHOVE SUCCESS! ✓', 50));
+      content.push(centerText('Ã¢Å“â€œ SHOVE SUCCESS! Ã¢Å“â€œ', 50));
       content.push('');
       content.push(centerText(`${target.name} pushed 5ft away!`, 50));
       content.push(centerText(`New position: (${target.position.x}, ${target.position.y})`, 50));
     }
   } else {
-    content.push(centerText('✗ SHOVE FAILED ✗', 50));
+    content.push(centerText('Ã¢Å“â€” SHOVE FAILED Ã¢Å“â€”', 50));
     content.push('');
     content.push(centerText(`${target.name} holds their ground!`, 50));
   }
 
   content.push('');
-  content.push('═'.repeat(50));
+  content.push('Ã¢â€¢Â'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
 
@@ -2462,19 +2509,20 @@ function handleCastSpellAction(
   const slotLevel = input.spellSlot ?? 0;
   const spellName = input.spellName || 'Unknown Spell';
   const pactMagic = input.pactMagic || false;
-  const actorId = actor.id;
+  // Use characterId for spell slot tracking if available, otherwise fall back to participantId
+  const spellSlotActorId = actor.characterId || actor.id;
   
   // Cantrips don't require slots
   if (slotLevel === 0) {
     const content: string[] = [];
     content.push(centerText(`${actor.name.toUpperCase()} CASTS CANTRIP`, 50));
     content.push('');
-    content.push('═'.repeat(50));
+    content.push('Ã¢â€¢Â'.repeat(50));
     content.push('');
     content.push(centerText(`Spell: ${spellName}`, 50));
     content.push(centerText('No spell slot required', 50));
     content.push('');
-    content.push('═'.repeat(50));
+    content.push('Ã¢â€¢Â'.repeat(50));
     content.push('');
     content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
     
@@ -2482,13 +2530,13 @@ function handleCastSpellAction(
   }
   
   // Check if actor has required spell slot
-  if (!hasSpellSlot(actorId, slotLevel, pactMagic)) {
+  if (!hasSpellSlot(spellSlotActorId, slotLevel, pactMagic)) {
     const slotType = pactMagic ? 'pact magic slot' : `level ${slotLevel} spell slot`;
     throw new Error(`${actor.name} has no available ${slotType}`);
   }
-  
+
   // Expend the spell slot
-  const expendResult = expendSpellSlot(actorId, slotLevel, pactMagic);
+  const expendResult = expendSpellSlot(spellSlotActorId, slotLevel, pactMagic);
   if (!expendResult.success) {
     throw new Error(expendResult.error || 'Failed to expend spell slot');
   }
@@ -2502,7 +2550,7 @@ function handleCastSpellAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} CASTS SPELL`, 50));
   content.push('');
-  content.push('═'.repeat(50));
+  content.push('Ã¢â€¢Â'.repeat(50));
   content.push('');
   content.push(centerText(`Spell: ${spellName}`, 50));
   content.push(centerText(`Slot Used: ${slotLabel}`, 50));
@@ -2520,10 +2568,10 @@ function handleCastSpellAction(
     }
   }
   
-  content.push('═'.repeat(50));
+  content.push('Ã¢â€¢Â'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
-  content.push(padText('✓ Spell slot expended', 50, 'left'));
+  content.push(padText('Ã¢Å“â€œ Spell slot expended', 50, 'left'));
   
   return createBox('CAST SPELL', content, undefined, 'HEAVY');
 }
@@ -2620,11 +2668,11 @@ function formatConditionName(condition: string): string {
  * @param current - Current HP
  * @param max - Maximum HP
  * @param width - Bar width in characters (default 20)
- * @returns String like "[█████████░░░░░░░░░░░]"
+ * @returns String like "[Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜]"
  */
 function generateHpBar(current: number, max: number, width: number = 20): string {
   const filledCount = Math.max(0, Math.min(width, Math.floor((current / max) * width)));
-  return `[${'█'.repeat(filledCount)}${'░'.repeat(width - filledCount)}]`;
+  return `[${'Ã¢â€“Ë†'.repeat(filledCount)}${'Ã¢â€“â€˜'.repeat(width - filledCount)}]`;
 }
 
 /**
@@ -2725,11 +2773,8 @@ export function advanceTurn(input: AdvanceTurnInput): string {
     round: encounter.round,
   });
 
-  // Tick conditions for current combatant (start of their turn)
-  if (currentCombatant) {
-    const currentTickResults = tickCombatantConditions(currentCombatant);
-    tickResults = mergeConditionTickResults(tickResults, currentTickResults);
-  }
+  // Note: Conditions tick at END of turn only (D&D 5e rules)
+  // Start-of-turn effects like regeneration are handled separately
 
   // Check if all combatants are down
   const aliveCombatants = encounter.participants.filter(p => p.hp > 0);
@@ -2743,26 +2788,26 @@ export function advanceTurn(input: AdvanceTurnInput): string {
 
   // Death save reminder for previous combatant if they're at 0 HP
   if (previousCombatant && needsDeathSave(previousCombatant)) {
-    content.push(centerText(`⚠ ${previousCombatant.name} NEEDS DEATH SAVE ⚠`, TURN_DISPLAY_WIDTH));
+    content.push(centerText(`Ã¢Å¡Â  ${previousCombatant.name} NEEDS DEATH SAVE Ã¢Å¡Â `, TURN_DISPLAY_WIDTH));
     content.push(padText(`${previousCombatant.name} is unconscious at 0 HP!`, TURN_DISPLAY_WIDTH, 'left'));
     content.push('');
   }
 
   // Header with round info
   if (isNewRound) {
-    content.push(centerText(`★ NEW ROUND ${encounter.round} ★`, TURN_DISPLAY_WIDTH));
+    content.push(centerText(`Ã¢Ëœâ€¦ NEW ROUND ${encounter.round} Ã¢Ëœâ€¦`, TURN_DISPLAY_WIDTH));
     content.push(centerText('Round Transition', TURN_DISPLAY_WIDTH));
   } else {
     content.push(centerText(`ROUND ${encounter.round}`, TURN_DISPLAY_WIDTH));
   }
   content.push('');
-  content.push('═'.repeat(TURN_DISPLAY_WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(TURN_DISPLAY_WIDTH));
   content.push('');
 
   // Current combatant's turn header
   content.push(centerText(`${currentCombatant.name}'s Turn`, TURN_DISPLAY_WIDTH));
   content.push('');
-  content.push('─'.repeat(TURN_DISPLAY_WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(TURN_DISPLAY_WIDTH));
   content.push('');
 
   // HP and status with visual bar
@@ -2772,7 +2817,7 @@ export function advanceTurn(input: AdvanceTurnInput): string {
 
   // Death save reminder for current combatant (0 HP)
   if (needsDeathSave(currentCombatant)) {
-    content.push(centerText('⚠ UNCONSCIOUS - DEATH SAVE REQUIRED ⚠', TURN_DISPLAY_WIDTH));
+    content.push(centerText('Ã¢Å¡Â  UNCONSCIOUS - DEATH SAVE REQUIRED Ã¢Å¡Â ', TURN_DISPLAY_WIDTH));
     content.push(padText(`${currentCombatant.name} is at 0 HP!`, TURN_DISPLAY_WIDTH, 'left'));
     content.push('');
   }
@@ -2782,7 +2827,7 @@ export function advanceTurn(input: AdvanceTurnInput): string {
   if (currentConditions.length > 0) {
     content.push(padText('Active Conditions:', TURN_DISPLAY_WIDTH, 'left'));
     for (const cond of currentConditions) {
-      let condStr = `  • ${formatConditionName(String(cond.condition))}`;
+      let condStr = `  Ã¢â‚¬Â¢ ${formatConditionName(String(cond.condition))}`;
       if (cond.roundsRemaining !== undefined) {
         condStr += ` (${cond.roundsRemaining} round${cond.roundsRemaining !== 1 ? 's' : ''})`;
       } else if (cond.duration && typeof cond.duration === 'string') {
@@ -2795,11 +2840,11 @@ export function advanceTurn(input: AdvanceTurnInput): string {
 
   // Display expired conditions from this turn transition
   if (tickResults.expired.length > 0) {
-    content.push('─'.repeat(TURN_DISPLAY_WIDTH));
+    content.push('Ã¢â€â‚¬'.repeat(TURN_DISPLAY_WIDTH));
     content.push('');
     content.push(padText('Conditions Expired:', TURN_DISPLAY_WIDTH, 'left'));
     for (const exp of tickResults.expired) {
-      content.push(padText(`  • ${exp.targetName}: ${exp.condition} has ended/expired/removed`, TURN_DISPLAY_WIDTH, 'left'));
+      content.push(padText(`  Ã¢â‚¬Â¢ ${exp.targetName}: ${exp.condition} has ended/expired/removed`, TURN_DISPLAY_WIDTH, 'left'));
     }
     content.push('');
   }
@@ -2807,26 +2852,26 @@ export function advanceTurn(input: AdvanceTurnInput): string {
   // Display conditions with updated durations
   if (tickResults.updated.length > 0) {
     if (tickResults.expired.length === 0) {
-      content.push('─'.repeat(TURN_DISPLAY_WIDTH));
+      content.push('Ã¢â€â‚¬'.repeat(TURN_DISPLAY_WIDTH));
       content.push('');
     }
     content.push(padText('Condition Durations Updated:', TURN_DISPLAY_WIDTH, 'left'));
     for (const upd of tickResults.updated) {
-      content.push(padText(`  • ${upd.targetName}: ${upd.condition} - ${upd.remaining} round${upd.remaining !== 1 ? 's' : ''} remaining`, TURN_DISPLAY_WIDTH, 'left'));
+      content.push(padText(`  Ã¢â‚¬Â¢ ${upd.targetName}: ${upd.condition} - ${upd.remaining} round${upd.remaining !== 1 ? 's' : ''} remaining`, TURN_DISPLAY_WIDTH, 'left'));
     }
     content.push('');
   }
 
   // Effect processing indicator
   if (processEffects) {
-    content.push('─'.repeat(TURN_DISPLAY_WIDTH));
+    content.push('Ã¢â€â‚¬'.repeat(TURN_DISPLAY_WIDTH));
     content.push('');
     content.push(padText('Start of Turn Effects processed', TURN_DISPLAY_WIDTH, 'left'));
     content.push('');
   }
 
   // Initiative order preview
-  content.push('═'.repeat(TURN_DISPLAY_WIDTH));
+  content.push('Ã¢â€¢Â'.repeat(TURN_DISPLAY_WIDTH));
   content.push('');
   content.push(padText('Initiative Order (Next up):', TURN_DISPLAY_WIDTH, 'left'));
   
@@ -2835,7 +2880,7 @@ export function advanceTurn(input: AdvanceTurnInput): string {
   for (let i = 0; i < previewCount; i++) {
     const idx = (encounter.currentTurnIndex + i) % encounter.participants.length;
     const p = encounter.participants[idx];
-    const marker = i === 0 ? '→ ' : '  ';
+    const marker = i === 0 ? 'Ã¢â€ â€™ ' : '  ';
     const status = p.hp === 0 ? ' [DOWN]' : '';
     content.push(padText(`${marker}${p.initiative}: ${p.name}${status}`, TURN_DISPLAY_WIDTH, 'left'));
   }
@@ -3027,29 +3072,29 @@ type DeathSaveOutcome =
 function determineDeathSaveOutcome(naturalRoll: number, total: number, state: DeathSaveState): DeathSaveOutcome {
   // Natural 20 always revives
   if (naturalRoll === 20) {
-    return { type: 'nat20', message: '✨ NATURAL 20! ✨ Regains consciousness at 1 HP!' };
+    return { type: 'nat20', message: 'Ã¢Å“Â¨ NATURAL 20! Ã¢Å“Â¨ Regains consciousness at 1 HP!' };
   }
   
   // Natural 1 always counts as 2 failures
   if (naturalRoll === 1) {
     const newFailures = state.failures + 2;
     if (newFailures >= 3) {
-      return { type: 'death', message: '💀 NATURAL 1! Two failures - DEATH! 💀' };
+      return { type: 'death', message: 'Ã°Å¸â€™â‚¬ NATURAL 1! Two failures - DEATH! Ã°Å¸â€™â‚¬' };
     }
-    return { type: 'nat1', message: '⚠️ NATURAL 1! Two failures added!' };
+    return { type: 'nat1', message: 'Ã¢Å¡Â Ã¯Â¸Â NATURAL 1! Two failures added!' };
   }
   
   // Check total for success/failure
   if (total >= 10) {
     const newSuccesses = state.successes + 1;
     if (newSuccesses >= 3) {
-      return { type: 'stabilized', message: '★ STABILIZED! ★ No longer dying.' };
+      return { type: 'stabilized', message: 'Ã¢Ëœâ€¦ STABILIZED! Ã¢Ëœâ€¦ No longer dying.' };
     }
     return { type: 'success', message: 'Success! Holding on...' };
   } else {
     const newFailures = state.failures + 1;
     if (newFailures >= 3) {
-      return { type: 'death', message: '💀 Three failures - DEATH! 💀' };
+      return { type: 'death', message: 'Ã°Å¸â€™â‚¬ Three failures - DEATH! Ã°Å¸â€™â‚¬' };
     }
     return { type: 'failure', message: 'Failure. Slipping away...' };
   }
@@ -3178,7 +3223,7 @@ function formatAlreadyDead(characterName: string): string {
   const content: string[] = [];
   content.push(centerText(`${characterName}`, DEATH_SAVE_DISPLAY_WIDTH));
   content.push('');
-  content.push(centerText('💀 DECEASED 💀', DEATH_SAVE_DISPLAY_WIDTH));
+  content.push(centerText('Ã°Å¸â€™â‚¬ DECEASED Ã°Å¸â€™â‚¬', DEATH_SAVE_DISPLAY_WIDTH));
   content.push('');
   content.push(padText('This character has already died.', DEATH_SAVE_DISPLAY_WIDTH, 'left'));
   content.push(padText('Death saves cannot be rolled for the dead.', DEATH_SAVE_DISPLAY_WIDTH, 'left'));
@@ -3199,41 +3244,41 @@ function getTensionIndicator(state: DeathSaveState, outcome: DeathSaveOutcome): 
   
   // Critical tension - one roll from death
   if (state.failures === 2) {
-    return '⚠ CRITICAL: One more failure means death!';
+    return 'Ã¢Å¡Â  CRITICAL: One more failure means death!';
   }
   
   // High tension - close to death
   if (state.failures === 2 && state.successes === 0) {
-    return '⚠ Teetering on the edge...';
+    return 'Ã¢Å¡Â  Teetering on the edge...';
   }
   
   // Hope rising - close to stability  
   if (state.successes === 2) {
-    return '✧ Hope rises - one more success to stabilize!';
+    return 'Ã¢Å“Â§ Hope rises - one more success to stabilize!';
   }
   
   // Mixed tension
   if (state.failures >= 1 && state.successes >= 1) {
-    return '◇ The struggle continues...';
+    return 'Ã¢â€”â€¡ The struggle continues...';
   }
   
   return null;
 }
 
 /**
- * Format the visual death save tracker (●●○ style).
+ * Format the visual death save tracker (Ã¢â€”ÂÃ¢â€”ÂÃ¢â€”â€¹ style).
  * 
  * Uses visual symbols for intuitive at-a-glance status:
- * - ● (filled circle) = success earned
- * - ✕ (X mark) = failure accrued  
- * - ○ (empty circle) = slot remaining
+ * - Ã¢â€”Â (filled circle) = success earned
+ * - Ã¢Å“â€¢ (X mark) = failure accrued  
+ * - Ã¢â€”â€¹ (empty circle) = slot remaining
  * 
  * @param state - Current death save state
- * @returns Formatted tracker string like "Successes: ●●○  Failures: ✕○○"
+ * @returns Formatted tracker string like "Successes: Ã¢â€”ÂÃ¢â€”ÂÃ¢â€”â€¹  Failures: Ã¢Å“â€¢Ã¢â€”â€¹Ã¢â€”â€¹"
  */
 function formatDeathSaveTracker(state: DeathSaveState): string {
-  const successMarkers = '●'.repeat(state.successes) + '○'.repeat(3 - state.successes);
-  const failureMarkers = '✕'.repeat(state.failures) + '○'.repeat(3 - state.failures);
+  const successMarkers = 'Ã¢â€”Â'.repeat(state.successes) + 'Ã¢â€”â€¹'.repeat(3 - state.successes);
+  const failureMarkers = 'Ã¢Å“â€¢'.repeat(state.failures) + 'Ã¢â€”â€¹'.repeat(3 - state.failures);
   
   return `Successes: ${successMarkers}  Failures: ${failureMarkers}`;
 }
@@ -3281,7 +3326,7 @@ function formatDeathSaveResult(
   if (rollMode !== 'normal') {
     const modeLabel = rollMode === 'advantage' ? 'ADVANTAGE' : 'DISADVANTAGE';
     const kept = rollMode === 'advantage' ? 'higher' : 'lower';
-    content.push(padText(`Roll (${modeLabel}): ${allRolls.join(', ')} → kept ${kept}: ${usedRoll}`, DEATH_SAVE_DISPLAY_WIDTH, 'left'));
+    content.push(padText(`Roll (${modeLabel}): ${allRolls.join(', ')} Ã¢â€ â€™ kept ${kept}: ${usedRoll}`, DEATH_SAVE_DISPLAY_WIDTH, 'left'));
   } else {
     content.push(padText(`Roll: ${usedRoll}`, DEATH_SAVE_DISPLAY_WIDTH, 'left'));
   }
@@ -3296,7 +3341,7 @@ function formatDeathSaveResult(
   content.push('');
   
   // Outcome message (dramatic)
-  content.push('─'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
   content.push('');
   content.push(centerText(outcome.message, DEATH_SAVE_DISPLAY_WIDTH));
   content.push('');
@@ -3309,26 +3354,26 @@ function formatDeathSaveResult(
   }
   
   // Death save tracker
-  content.push('─'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
+  content.push('Ã¢â€â‚¬'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
   content.push('');
   content.push(centerText(formatDeathSaveTracker(state), DEATH_SAVE_DISPLAY_WIDTH));
   content.push('');
   
   // Final status with appropriate gravitas
   if (state.isDead) {
-    content.push('═'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
+    content.push('Ã¢â€¢Â'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
     content.push('');
-    content.push(centerText(`☠ ${characterName} has died. ☠`, DEATH_SAVE_DISPLAY_WIDTH));
+    content.push(centerText(`Ã¢ËœÂ  ${characterName} has died. Ã¢ËœÂ `, DEATH_SAVE_DISPLAY_WIDTH));
     content.push(centerText('Rest in peace.', DEATH_SAVE_DISPLAY_WIDTH));
   } else if (state.isStable) {
-    content.push('═'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
+    content.push('Ã¢â€¢Â'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
     content.push('');
-    content.push(centerText(`✓ ${characterName} is stable. ✓`, DEATH_SAVE_DISPLAY_WIDTH));
+    content.push(centerText(`Ã¢Å“â€œ ${characterName} is stable. Ã¢Å“â€œ`, DEATH_SAVE_DISPLAY_WIDTH));
     content.push(centerText('Unconscious but no longer dying.', DEATH_SAVE_DISPLAY_WIDTH));
   } else if (outcome.type === 'nat20') {
-    content.push('═'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
+    content.push('Ã¢â€¢Â'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
     content.push('');
-    content.push(centerText(`⚔ ${characterName} is back in the fight! ⚔`, DEATH_SAVE_DISPLAY_WIDTH));
+    content.push(centerText(`Ã¢Å¡â€ ${characterName} is back in the fight! Ã¢Å¡â€`, DEATH_SAVE_DISPLAY_WIDTH));
     content.push(centerText('HP: 1', DEATH_SAVE_DISPLAY_WIDTH));
   }
   
@@ -3385,32 +3430,32 @@ export type RenderBattlefieldInput = z.input<typeof renderBattlefieldSchema>;
 /** Legend detail level type */
 export type LegendDetailLevel = 'minimal' | 'standard' | 'detailed';
 
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // BATTLEFIELD CONSTANTS
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /** Symbols for terrain features */
 const TERRAIN_SYMBOLS = {
-  floor: '·',
-  wall: '█',
-  difficultTerrain: '░',
-  water: '≈',
+  floor: 'Ã‚Â·',
+  wall: 'Ã¢â€“Ë†',
+  difficultTerrain: 'Ã¢â€“â€˜',
+  water: 'Ã¢â€°Ë†',
   hazard: '*',
 } as const;
 
 /** Symbols for entity states */
 const ENTITY_STATE_SYMBOLS = {
-  dead: '†',
-  unconscious: '○',
-  currentTurn: '▶',
+  dead: 'Ã¢â‚¬Â ',
+  unconscious: 'Ã¢â€”â€¹',
+  currentTurn: 'Ã¢â€“Â¶',
 } as const;
 
 /** Width of the battlefield display header/dividers */
 const BATTLEFIELD_DISPLAY_WIDTH = 67;
 
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // ENTITY STATE HELPERS
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /** Computed state information for a participant */
 interface EntityStateInfo {
@@ -3458,9 +3503,9 @@ function getEntityStateInfo(
   return { isUnconscious, isDead, isBloodied, isCurrentTurn, conditions, displaySymbol };
 }
 
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // SYMBOL ASSIGNMENT
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /**
  * Assign unique symbols to all entities in an encounter.
@@ -3540,9 +3585,9 @@ function assignSymbolsToGroup(
   }
 }
 
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // TERRAIN HELPERS
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /** Terrain cell types */
 type TerrainCellType = 'wall' | 'difficult' | 'water' | 'hazard' | 'floor';
@@ -3586,9 +3631,9 @@ function getTerrainSymbol(terrainType: TerrainCellType): string {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // VIEWPORT CALCULATION
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /** Calculated viewport bounds */
 interface ViewportBounds {
@@ -3642,9 +3687,9 @@ function calculateViewport(
   return { x: viewX, y: viewY, width: viewWidth, height: viewHeight };
 }
 
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // GRID BUILDING
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /**
  * Build a position-to-entities lookup map for efficient grid rendering.
@@ -3712,9 +3757,9 @@ function buildBattlefieldGrid(
   return grid;
 }
 
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // LEGEND FORMATTING
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /**
  * Format the position string for an entity, optionally including elevation.
@@ -3741,7 +3786,7 @@ function formatPosition(
  * 
  * @param hp - Current HP
  * @param maxHp - Maximum HP
- * @param isBloodied - Whether the entity is bloodied (≤50% HP)
+ * @param isBloodied - Whether the entity is bloodied (Ã¢â€°Â¤50% HP)
  * @param isDead - Whether the entity is dead
  * @param isUnconscious - Whether the entity is unconscious/dying
  * @returns Formatted HP string like "30/45" or "30/45 [BLOODIED]"
@@ -3809,8 +3854,8 @@ function formatEntityLegendLine(
     
     const deathState = getDeathSaveState(encounterId, participant.id);
     if (deathState && participant.hp === 0 && !deathState.isDead && !deathState.isStable) {
-      const successMarkers = '●'.repeat(deathState.successes) + '○'.repeat(3 - deathState.successes);
-      const failureMarkers = '✕'.repeat(deathState.failures) + '○'.repeat(3 - deathState.failures);
+      const successMarkers = 'Ã¢â€”Â'.repeat(deathState.successes) + 'Ã¢â€”â€¹'.repeat(3 - deathState.successes);
+      const failureMarkers = 'Ã¢Å“â€¢'.repeat(deathState.failures) + 'Ã¢â€”â€¹'.repeat(3 - deathState.failures);
       line += ` | Death Saves: ${successMarkers} / ${failureMarkers}`;
     }
   }
@@ -3818,9 +3863,9 @@ function formatEntityLegendLine(
   return line;
 }
 
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // MAIN RENDER FUNCTION
-// ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /**
  * Render an encounter battlefield as an ASCII tactical map.
@@ -3872,9 +3917,9 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
   const lines: string[] = [];
   
   // Header
-  lines.push('═'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
+  lines.push('Ã¢â€¢Â'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
   lines.push(`                    BATTLEFIELD - Round ${round}`);
-  lines.push('═'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
+  lines.push('Ã¢â€¢Â'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
   lines.push('');
   
   // Coordinate headers (x-axis)
@@ -3885,8 +3930,8 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
   // Grid rows with y-axis coordinates
   for (let i = 0; i < grid.length; i++) {
     const y = viewportBounds.y + i;
-    const prefix = showCoordinates ? `${y.toString().padStart(2)} │` : '│';
-    lines.push(`${prefix}${grid[i].join('│')}│`);
+    const prefix = showCoordinates ? `${y.toString().padStart(2)} Ã¢â€â€š` : 'Ã¢â€â€š';
+    lines.push(`${prefix}${grid[i].join('Ã¢â€â€š')}Ã¢â€â€š`);
   }
   lines.push('');
   
@@ -3895,7 +3940,7 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
   
   // Entity legend
   if (showLegend) {
-    lines.push('─'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
+    lines.push('Ã¢â€â‚¬'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
     lines.push('COMBATANTS:');
     lines.push('');
     
@@ -3919,7 +3964,7 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
     // Elevation explanation
     if (showElevation && hasMultipleElevations) {
       lines.push('');
-      lines.push('ELEVATION: z=N means N×5ft above ground (z<0 = below ground)');
+      lines.push('ELEVATION: z=N means NÃƒâ€”5ft above ground (z<0 = below ground)');
     }
   }
   
@@ -4452,7 +4497,7 @@ function formatEndEncounter(
     content.push('PARTICIPANTS:');
     
     for (const p of summary.participants) {
-      const marker = p.status === 'alive' ? '✓' : '✗';
+      const marker = p.status === 'alive' ? 'Ã¢Å“â€œ' : 'Ã¢Å“â€”';
       if (p.status === 'alive') {
         content.push(`  ${marker} ${p.name} - ALIVE (${p.hp}/${p.maxHp} HP)`);
       } else {
@@ -4544,3 +4589,668 @@ export function endEncounter(input: z.infer<typeof endEncounterSchema>): string 
   // 6. Return ASCII formatted output
   return formatEndEncounter(input, encounter, summary);
 }
+
+
+
+// ============================================================
+// ADR-005: STATE SYNCHRONIZATION - SNAPSHOT STORAGE
+// ============================================================
+
+/**
+ * Snapshot of participant state at encounter creation.
+ * Used to calculate diffs when encounter ends.
+ */
+interface ParticipantSnapshot {
+  characterId: string;
+  participantId: string;
+  initialHp: number;
+  initialMaxHp: number;
+  initialConditions: ActiveCondition[];
+  initialSpellSlots?: { [level: number]: { current: number; max: number } };
+  initialPactSlots?: { current: number; max: number; slotLevel: number };
+}
+
+/**
+ * State diff for a participant after encounter ends.
+ * Shows what changed during the encounter.
+ */
+interface ParticipantStateDiff {
+  participantId: string;
+  characterId?: string;
+  name: string;
+  isEphemeral: boolean;
+  hp: {
+    initial: number;
+    final: number;
+    delta: number;
+  };
+  conditions: {
+    initial: ActiveCondition[];
+    added: ActiveCondition[];
+    removed: string[];
+    final: ActiveCondition[];
+  };
+  spellSlots?: {
+    initial: { [level: number]: { current: number; max: number } };
+    final: { [level: number]: { current: number; max: number } };
+    expended: { level: number; count: number }[];
+  };
+  combatStats: {
+    damageDealt: number;
+    damageTaken: number;
+    healingDone: number;
+    attacksMade: number;
+    attacksHit: number;
+  };
+}
+
+// Store initial snapshots keyed by encounterId
+const encounterSnapshotStore = new Map<string, Map<string, ParticipantSnapshot>>();
+
+/**
+ * Capture initial snapshot for participants with characterId
+ * Includes conditions and spell slots for full state tracking
+ */
+function captureParticipantSnapshots(encounterId: string, participants: Participant[]): void {
+  const snapshots = new Map<string, ParticipantSnapshot>();
+
+  for (const p of participants) {
+    if (p.characterId) {
+      // Get current conditions from condition store
+      const currentConditions = conditionStore.get(p.characterId) || [];
+
+      // Get current spell slots from in-memory store or character JSON
+      let initialSpellSlots: { [level: number]: { current: number; max: number } } | undefined;
+      let initialPactSlots: { current: number; max: number; slotLevel: number } | undefined;
+
+      // First check in-memory spell slot store (active session)
+      const inMemorySlots = getSpellSlotDataForCharacter(p.characterId);
+      if (inMemorySlots) {
+        initialSpellSlots = inMemorySlots.slots;
+        initialPactSlots = inMemorySlots.pactSlots;
+      } else {
+        // Fall back to character JSON (persisted from previous session)
+        try {
+          const charPath = path.join(DATA_ROOT, 'characters', `${p.characterId}.json`);
+          if (fs.existsSync(charPath)) {
+            const charData = JSON.parse(fs.readFileSync(charPath, 'utf-8'));
+            if (charData.spellSlots) {
+              initialSpellSlots = charData.spellSlots;
+            }
+            if (charData.pactSlots) {
+              initialPactSlots = charData.pactSlots;
+            }
+          }
+        } catch {
+          // If we can't read spell slots, continue without them
+        }
+      }
+
+      snapshots.set(p.id, {
+        characterId: p.characterId,
+        participantId: p.id,
+        initialHp: p.hp,
+        initialMaxHp: p.maxHp,
+        initialConditions: [...currentConditions], // Deep copy
+        initialSpellSlots,
+        initialPactSlots,
+      });
+    }
+  }
+
+  encounterSnapshotStore.set(encounterId, snapshots);
+}
+
+/**
+ * Calculate state diffs for all participants
+ * Includes full condition and spell slot tracking
+ */
+function calculateParticipantUpdates(encounterId: string, participants: Array<Participant & { initiative: number; damageDealt?: number; damageTaken?: number; healingDone?: number; attacksMade?: number; attacksHit?: number; conditionsApplied?: string[] }>): ParticipantStateDiff[] {
+  const snapshots = encounterSnapshotStore.get(encounterId);
+  const diffs: ParticipantStateDiff[] = [];
+
+  for (const p of participants) {
+    const snapshot = snapshots?.get(p.id);
+    const initialHp = snapshot?.initialHp ?? p.maxHp;
+    const charId = (p as any).characterId;
+
+    // Get current conditions for this participant
+    // Check both characterId and participantId since conditions may be stored under either
+    const charConditions = charId ? (conditionStore.get(charId) || []) : [];
+    const participantConditions = conditionStore.get(p.id) || [];
+
+    // Also check encounter-scoped conditions
+    const encounterConditions = conditionStore.get(`${encounterId}:${p.id}`) || [];
+
+    // Merge all sources, avoiding duplicates by condition name
+    const allConditionsMap = new Map<string, ActiveCondition>();
+    for (const c of [...charConditions, ...participantConditions, ...encounterConditions]) {
+      const key = typeof c.condition === 'string' ? c.condition : String(c.condition);
+      if (!allConditionsMap.has(key)) {
+        allConditionsMap.set(key, c);
+      }
+    }
+    const allCurrentConditions = Array.from(allConditionsMap.values());
+
+    // Filter out expired conditions (roundsRemaining <= 0)
+    const activeConditions = allCurrentConditions.filter(c =>
+      c.roundsRemaining === undefined || c.roundsRemaining > 0
+    );
+
+    // Calculate added conditions (in current but not in initial)
+    const initialConditionNames = (snapshot?.initialConditions || []).map(c => c.condition);
+    const addedConditions = activeConditions.filter(
+      c => !initialConditionNames.includes(c.condition)
+    );
+
+    // Calculate removed conditions (in initial but not in current)
+    const currentConditionNames = activeConditions.map(c => c.condition);
+    const removedConditions = (snapshot?.initialConditions || [])
+      .filter(c => !currentConditionNames.includes(c.condition))
+      .map(c => c.condition as string);
+
+    // Build the diff
+    const diff: ParticipantStateDiff = {
+      participantId: p.id,
+      characterId: charId,
+      name: p.name,
+      isEphemeral: !charId,
+      hp: {
+        initial: initialHp,
+        final: p.hp,
+        delta: p.hp - initialHp,
+      },
+      conditions: {
+        initial: snapshot?.initialConditions || [],
+        added: addedConditions,
+        removed: removedConditions,
+        final: activeConditions,
+      },
+      combatStats: {
+        damageDealt: p.damageDealt || 0,
+        damageTaken: p.damageTaken || 0,
+        healingDone: p.healingDone || 0,
+        attacksMade: p.attacksMade || 0,
+        attacksHit: p.attacksHit || 0,
+      },
+    };
+
+    // Add spell slot tracking if character has spell slots
+    if (charId) {
+      const currentSlots = getSpellSlotDataForCharacter(charId);
+      if (currentSlots || snapshot?.initialSpellSlots) {
+        const initial = snapshot?.initialSpellSlots || {};
+        const final = currentSlots?.slots || initial;
+
+        // Calculate expended slots
+        const expended: { level: number; count: number }[] = [];
+        for (const [levelStr, initialSlot] of Object.entries(initial)) {
+          const level = Number(levelStr);
+          const finalSlot = final[level];
+          if (finalSlot && initialSlot.current > finalSlot.current) {
+            expended.push({
+              level,
+              count: initialSlot.current - finalSlot.current,
+            });
+          }
+        }
+
+        diff.spellSlots = {
+          initial,
+          final,
+          expended,
+        };
+      }
+    }
+
+    diffs.push(diff);
+  }
+
+  return diffs;
+}
+
+// ============================================================
+// ADR-005: manage_encounter COMPOSITE TOOL
+// ============================================================
+
+/**
+ * Composite tool schema for manage_encounter
+ * Operations: create, get, end, commit, list
+ */
+export const manageEncounterSchema = z.discriminatedUnion('operation', [
+  // CREATE operation - extends createEncounterSchema
+  z.object({
+    operation: z.literal('create'),
+    seed: z.string().optional(),
+    participants: z.array(ParticipantSchema).min(1),
+    terrain: TerrainSchema.optional(),
+    lighting: LightSchema.default('bright'),
+    surprise: z.array(z.string()).optional(),
+  }),
+  
+  // GET operation - extends getEncounterSchema
+  z.object({
+    operation: z.literal('get'),
+    encounterId: z.string(),
+    verbosity: z.enum(['minimal', 'summary', 'standard', 'detailed']).optional().default('standard'),
+  }),
+  
+  // END operation - extends endEncounterSchema with participantUpdates
+  z.object({
+    operation: z.literal('end'),
+    encounterId: z.string(),
+    outcome: z.enum(['victory', 'defeat', 'fled', 'negotiated', 'other']),
+    generateSummary: z.boolean().optional().default(true),
+    preserveLog: z.boolean().optional().default(false),
+    notes: z.string().optional(),
+  }),
+  
+  // COMMIT operation - sync state to persistent characters
+  z.object({
+    operation: z.literal('commit'),
+    encounterId: z.string(),
+    characterIds: z.array(z.string()).optional().describe('Specific characters to commit (defaults to all)'),
+    dryRun: z.boolean().optional().default(false).describe('Preview changes without applying'),
+  }),
+  
+  // LIST operation - list active/preserved encounters
+  z.object({
+    operation: z.literal('list'),
+    includeEnded: z.boolean().optional().default(false),
+  }),
+]);
+
+export type ManageEncounterInput = z.infer<typeof manageEncounterSchema>;
+
+/**
+ * Composite handler for manage_encounter tool
+ * Routes to appropriate operation handler
+ */
+export function manageEncounter(input: ManageEncounterInput): string {
+  switch (input.operation) {
+    case 'create':
+      return handleManageEncounterCreate(input);
+    case 'get':
+      return handleManageEncounterGet(input);
+    case 'end':
+      return handleManageEncounterEnd(input);
+    case 'commit':
+      return handleManageEncounterCommit(input);
+    case 'list':
+      return handleManageEncounterList(input);
+    default:
+      throw new Error(`Unknown operation: ${(input as any).operation}`);
+  }
+}
+
+/**
+ * Handle CREATE operation
+ */
+function handleManageEncounterCreate(input: Extract<ManageEncounterInput, { operation: 'create' }>): string {
+  // Validate characterIds exist if provided
+  for (const p of input.participants) {
+    if (p.characterId) {
+      const charPath = path.join(DATA_ROOT, 'characters', `${p.characterId}.json`);
+      if (!fs.existsSync(charPath)) {
+        throw new Error(`Character not found: ${p.characterId}`);
+      }
+      
+      // Load HP from persistent character
+      try {
+        const charData = JSON.parse(fs.readFileSync(charPath, 'utf-8'));
+        // Override participant HP with persistent character HP
+        (p as any).hp = charData.hp;
+        (p as any).maxHp = charData.maxHp;
+      } catch {
+        // If we can't read, use provided values
+      }
+    }
+  }
+  
+  // Call existing createEncounter
+  const result = createEncounter(input);
+  
+  // Extract encounter ID from result and capture snapshots
+  const idMatch = result.match(/Encounter ID:\s*([a-zA-Z0-9-]+)/i);
+  if (idMatch) {
+    const encounterId = idMatch[1];
+    const encounter = encounterStore.get(encounterId);
+    if (encounter) {
+      captureParticipantSnapshots(encounterId, encounter.participants);
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Handle GET operation
+ */
+function handleManageEncounterGet(input: Extract<ManageEncounterInput, { operation: 'get' }>): string {
+  return getEncounter({
+    encounterId: input.encounterId,
+    verbosity: input.verbosity,
+  });
+}
+
+/**
+ * Handle END operation with participantUpdates
+ */
+function handleManageEncounterEnd(input: Extract<ManageEncounterInput, { operation: 'end' }>): string {
+  const encounter = encounterStore.get(input.encounterId);
+  if (!encounter) {
+    throw new Error(`Encounter not found: ${input.encounterId}`);
+  }
+  
+  // Calculate participant updates before ending
+  const participantUpdates = calculateParticipantUpdates(input.encounterId, encounter.participants);
+
+  // Check if any persistent characters changed (HP, conditions, or spell slots)
+  const hasChanges = participantUpdates.some(p =>
+    !p.isEphemeral && (
+      p.hp.delta !== 0 ||
+      p.conditions.added.length > 0 ||
+      p.conditions.removed.length > 0
+    )
+  );
+
+  // Call existing endEncounter
+  const result = endEncounter({
+    encounterId: input.encounterId,
+    outcome: input.outcome,
+    generateSummary: input.generateSummary,
+    preserveLog: input.preserveLog,
+    notes: input.notes,
+  });
+
+  // Append participantUpdates section
+  const WIDTH = 60;
+  const updateContent: string[] = [];
+
+  updateContent.push('');
+  updateContent.push('participantUpdates:');
+  updateContent.push('PARTICIPANT UPDATES:');
+
+  for (const p of participantUpdates) {
+    const marker = p.isEphemeral ? '(ephemeral)' : '(persistent)';
+    updateContent.push(`  ${p.name} ${marker}:`);
+    updateContent.push(`    hp: initial=${p.hp.initial}, final=${p.hp.final}, delta=${p.hp.delta}`);
+
+    // Show initial conditions if any
+    if (p.conditions.initial.length > 0) {
+      const initialNames = p.conditions.initial.map(c => c.condition).join(', ');
+      updateContent.push(`    conditions initial: ${initialNames}`);
+    }
+
+    // Show added conditions if any
+    if (p.conditions.added.length > 0) {
+      const addedNames = p.conditions.added.map(c => c.condition).join(', ');
+      updateContent.push(`    conditions added: ${addedNames}`);
+    }
+
+    // Show removed conditions if any
+    if (p.conditions.removed.length > 0) {
+      updateContent.push(`    conditions removed: ${p.conditions.removed.join(', ')}`);
+    }
+
+    // Show spell slot info if available
+    if (p.spellSlots) {
+      updateContent.push(`    spellSlots: tracked`);
+      if (p.spellSlots.expended.length > 0) {
+        for (const exp of p.spellSlots.expended) {
+          updateContent.push(`      level ${exp.level}: expended ${exp.count}`);
+        }
+      }
+    }
+
+    updateContent.push(`    isEphemeral: ${p.isEphemeral}`);
+    if (!p.isEphemeral) {
+      updateContent.push(`    characterId: ${p.characterId}`);
+    }
+    updateContent.push(`    damageDealt: ${p.combatStats.damageDealt}`);
+    updateContent.push(`    attacksMade: ${p.combatStats.attacksMade}`);
+    updateContent.push(`    attacksHit: ${p.combatStats.attacksHit}`);
+  }
+
+  updateContent.push('');
+  updateContent.push(`commitRequired: ${hasChanges}`);
+  updateContent.push('');
+
+  return result + '\n' + createBox('STATE CHANGES', updateContent, WIDTH, 'LIGHT');
+}
+
+/**
+ * Handle COMMIT operation - sync to persistent characters
+ * Persists HP, conditions (as structured objects), and spell slots
+ */
+function handleManageEncounterCommit(input: Extract<ManageEncounterInput, { operation: 'commit' }>): string {
+  const encounter = encounterStore.get(input.encounterId);
+  if (!encounter) {
+    throw new Error(`Encounter not found: ${input.encounterId}`);
+  }
+
+  if (!encounter.preserved) {
+    throw new Error(`Encounter was not preserved. Use preserveLog: true when ending.`);
+  }
+
+  // Calculate participant updates to get full diff
+  const participantUpdates = calculateParticipantUpdates(input.encounterId, encounter.participants);
+  const snapshots = encounterSnapshotStore.get(input.encounterId);
+  const WIDTH = 60;
+  const content: string[] = [];
+
+  let committed = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  content.push('');
+
+  if (input.dryRun) {
+    content.push('DRY RUN - No changes applied');
+    content.push('');
+  }
+
+  for (const p of encounter.participants) {
+    const charId = (p as any).characterId;
+
+    // Skip ephemeral participants
+    if (!charId) {
+      skipped++;
+      content.push(`  ${p.name}: skipped (ephemeral)`);
+      continue;
+    }
+
+    // Check if this character is in the filter
+    if (input.characterIds && !input.characterIds.includes(charId)) {
+      skipped++;
+      content.push(`  ${p.name}: skipped (excluded)`);
+      continue;
+    }
+
+    const charPath = path.join(DATA_ROOT, 'characters', `${charId}.json`);
+
+    if (!fs.existsSync(charPath)) {
+      errors.push(`${p.name}: error - Character not found`);
+      continue;
+    }
+
+    try {
+      const charData = JSON.parse(fs.readFileSync(charPath, 'utf-8'));
+      const snapshot = snapshots?.get(p.id);
+      const participantDiff = participantUpdates.find(u => u.participantId === p.id);
+      const initialHp = snapshot?.initialHp ?? charData.hp;
+
+      content.push(`  ${p.name}:`);
+      content.push(`    hp: ${initialHp} -> ${p.hp}`);
+
+      if (!input.dryRun) {
+        // Apply HP change
+        charData.hp = p.hp;
+
+        // Handle conditions - use the calculated diff for accuracy
+        if (participantDiff) {
+          // Initialize conditions array if needed
+          if (!charData.conditions) {
+            charData.conditions = [];
+          }
+
+          // Add new conditions (as structured objects with full metadata)
+          for (const addedCond of participantDiff.conditions.added) {
+            // Check if condition already exists by name
+            const existingIdx = charData.conditions.findIndex(
+              (c: any) => (typeof c === 'string' ? c : c.condition) === addedCond.condition
+            );
+
+            const conditionObj = {
+              condition: addedCond.condition,
+              source: addedCond.source,
+              duration: addedCond.duration,
+              description: addedCond.description,
+              exhaustionLevel: addedCond.exhaustionLevel,
+              roundsRemaining: addedCond.roundsRemaining,
+            };
+
+            if (existingIdx === -1) {
+              charData.conditions.push(conditionObj);
+              content.push(`    ${addedCond.condition}: applied`);
+            } else {
+              // Update existing condition (e.g., exhaustion level change)
+              charData.conditions[existingIdx] = conditionObj;
+              content.push(`    ${addedCond.condition}: updated`);
+            }
+
+            // Also add to in-memory condition store
+            manageCondition({
+              targetId: charId,
+              operation: 'add',
+              condition: addedCond.condition as any,
+              duration: addedCond.duration || 'until_rest',
+              source: addedCond.source || 'Committed from encounter',
+              description: addedCond.description,
+              exhaustionLevels: addedCond.exhaustionLevel,
+            });
+          }
+
+          // Remove conditions that were removed during combat
+          for (const removedCondName of participantDiff.conditions.removed) {
+            const idx = charData.conditions.findIndex(
+              (c: any) => (typeof c === 'string' ? c : c.condition) === removedCondName
+            );
+            if (idx !== -1) {
+              charData.conditions.splice(idx, 1);
+              content.push(`    ${removedCondName}: removed`);
+            }
+
+            // Also remove from in-memory condition store
+            manageCondition({
+              targetId: charId,
+              operation: 'remove',
+              condition: removedCondName as any,
+            });
+          }
+
+          // Update remaining durations for persisted conditions
+          for (const finalCond of participantDiff.conditions.final) {
+            const idx = charData.conditions.findIndex(
+              (c: any) => (typeof c === 'string' ? c : c.condition) === finalCond.condition
+            );
+            if (idx !== -1 && finalCond.roundsRemaining !== undefined) {
+              if (typeof charData.conditions[idx] === 'object') {
+                charData.conditions[idx].roundsRemaining = finalCond.roundsRemaining;
+              }
+            }
+          }
+
+          // Persist spell slots if they changed
+          if (participantDiff.spellSlots && participantDiff.spellSlots.expended.length > 0) {
+            charData.spellSlots = participantDiff.spellSlots.final;
+            for (const exp of participantDiff.spellSlots.expended) {
+              content.push(`    spell slot level ${exp.level}: ${exp.count} expended`);
+            }
+          }
+        }
+
+        // Also persist current spell slots from in-memory store
+        const currentSlots = getSpellSlotDataForCharacter(charId);
+        if (currentSlots) {
+          charData.spellSlots = currentSlots.slots;
+          if (currentSlots.pactSlots) {
+            charData.pactSlots = currentSlots.pactSlots;
+          }
+        }
+
+        fs.writeFileSync(charPath, JSON.stringify(charData, null, 2));
+      } else {
+        // Dry run - just show what would happen
+        if (participantDiff) {
+          for (const addedCond of participantDiff.conditions.added) {
+            content.push(`    ${addedCond.condition}: would be applied`);
+          }
+          for (const removedCondName of participantDiff.conditions.removed) {
+            content.push(`    ${removedCondName}: would be removed`);
+          }
+        }
+      }
+
+      committed++;
+    } catch (e) {
+      errors.push(`${p.name}: error - ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  }
+
+  content.push('');
+  content.push(`committed: ${committed}`);
+  content.push(`skipped: ${skipped} (ephemeral)`);
+
+  if (errors.length > 0) {
+    content.push('');
+    content.push('ERRORS:');
+    for (const err of errors) {
+      content.push(`  ${err}`);
+    }
+  }
+
+  content.push('');
+
+  // Clean up snapshot store if not dry run
+  if (!input.dryRun) {
+    encounterSnapshotStore.delete(input.encounterId);
+  }
+
+  return createBox('COMMIT RESULTS', content, WIDTH, 'LIGHT');
+}
+
+/**
+ * Handle LIST operation
+ */
+function handleManageEncounterList(input: Extract<ManageEncounterInput, { operation: 'list' }>): string {
+  const WIDTH = 60;
+  const content: string[] = [];
+  
+  content.push('');
+  
+  let count = 0;
+  for (const [id, encounter] of encounterStore.entries()) {
+    if (encounter.status === 'ended' && !input.includeEnded) continue;
+    
+    count++;
+    const status = encounter.status === 'ended' ? 'ENDED' : 'ACTIVE';
+    content.push(`  ${id}:`);
+    content.push(`    Status: ${status}`);
+    content.push(`    Round: ${encounter.round}`);
+    content.push(`    Participants: ${encounter.participants.length}`);
+    if (encounter.outcome) {
+      content.push(`    Outcome: ${encounter.outcome}`);
+    }
+    content.push('');
+  }
+  
+  if (count === 0) {
+    content.push('  No encounters found');
+    content.push('');
+  }
+  
+  return createBox(`ENCOUNTERS (${count})`, content, WIDTH, 'LIGHT');
+
+}
+

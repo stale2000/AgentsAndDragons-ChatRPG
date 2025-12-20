@@ -497,6 +497,11 @@ export interface Character {
     current: number;
     max: number;
   };
+  /** Hit dice tracking (persisted across sessions) */
+  hitDice?: {
+    current: number;
+    max: number;
+  };
   createdAt: string;
 }
 
@@ -1528,6 +1533,30 @@ export function updateCharacter(input: UpdateCharacterInput): {
     }
 
     updatedCharacter.hp = newHp;
+  }
+
+  // Handle resource update (Ki, Rage, Superiority Dice, etc.)
+  if (singleInput.resource !== undefined) {
+    if (typeof singleInput.resource === 'number') {
+      // Just update current value
+      if (updatedCharacter.resource) {
+        updatedCharacter.resource.current = singleInput.resource;
+      } else {
+        // Create new resource with default name
+        updatedCharacter.resource = {
+          name: 'Resource',
+          current: singleInput.resource,
+          max: singleInput.resource,
+        };
+      }
+    } else {
+      // Full resource object update
+      updatedCharacter.resource = {
+        name: singleInput.resource.name ?? updatedCharacter.resource?.name ?? 'Resource',
+        current: singleInput.resource.current ?? updatedCharacter.resource?.current ?? 0,
+        max: singleInput.resource.max ?? updatedCharacter.resource?.max ?? 0,
+      };
+    }
   }
 
   // Save updated character
@@ -2598,13 +2627,28 @@ interface RestChanges {
 
 /**
  * Get hit dice info for a character, initializing if needed.
- * 
+ * Loads from persisted character JSON if available.
+ *
  * @param characterId - The character's unique ID
  * @param level - Character level (for initialization)
  * @returns Hit dice state { current, max }
  */
 function getHitDice(characterId: string, level: number): { current: number; max: number } {
   if (!hitDiceStore.has(characterId)) {
+    // Try to load from character JSON file first
+    const charFilePath = path.join(DATA_ROOT, 'characters', `${characterId}.json`);
+    if (fs.existsSync(charFilePath)) {
+      try {
+        const charData = JSON.parse(fs.readFileSync(charFilePath, 'utf-8'));
+        if (charData.hitDice && typeof charData.hitDice.current === 'number' && typeof charData.hitDice.max === 'number') {
+          hitDiceStore.set(characterId, { current: charData.hitDice.current, max: charData.hitDice.max });
+          return hitDiceStore.get(characterId)!;
+        }
+      } catch {
+        // Fall through to default initialization
+      }
+    }
+    // Default: initialize with full hit dice
     hitDiceStore.set(characterId, { current: level, max: level });
   }
   return hitDiceStore.get(characterId)!;
@@ -2816,8 +2860,20 @@ export function takeRest(input: TakeRestInput | { batch: TakeRestInput[] }): {
     });
   }
 
-  // Update hit dice store
+  // Update hit dice store and persist to character JSON
   hitDiceStore.set(characterId, { current: changes.hitDiceAfter, max: changes.hitDiceMax });
+
+  // Persist hit dice to character JSON file
+  const charFilePath = path.join(DATA_ROOT, 'characters', `${characterId}.json`);
+  try {
+    if (fs.existsSync(charFilePath)) {
+      const charData = JSON.parse(fs.readFileSync(charFilePath, 'utf-8'));
+      charData.hitDice = { current: changes.hitDiceAfter, max: changes.hitDiceMax };
+      fs.writeFileSync(charFilePath, JSON.stringify(charData, null, 2), 'utf-8');
+    }
+  } catch {
+    // Silent fail - in-memory store is still updated
+  }
 
   return {
     success: true,
@@ -3405,6 +3461,46 @@ function getSpellSlots(
     return initializeSpellSlots(characterId, className, level, customClass);
   }
   return spellSlotStore.get(characterId)!;
+}
+
+/**
+ * Get current spell slot data for a character if it exists in the store.
+ * Used by encounter commit to check if spell slots need to be persisted.
+ *
+ * @param characterId - The character's unique ID
+ * @returns Spell slot data or undefined if not tracked
+ */
+export function getSpellSlotDataForCharacter(characterId: string): {
+  slots: Record<number, { current: number; max: number }>;
+  pactSlots?: { current: number; max: number; slotLevel: number };
+} | undefined {
+  const data = spellSlotStore.get(characterId);
+  if (!data) return undefined;
+
+  // Convert to simplified format for persistence
+  const result: {
+    slots: Record<number, { current: number; max: number }>;
+    pactSlots?: { current: number; max: number; slotLevel: number };
+  } = {
+    slots: {},
+  };
+
+  for (const [level, slot] of Object.entries(data.slots)) {
+    result.slots[Number(level)] = {
+      current: slot.current,
+      max: slot.max,
+    };
+  }
+
+  if (data.pactSlots) {
+    result.pactSlots = {
+      current: data.pactSlots.current,
+      max: data.pactSlots.max,
+      slotLevel: data.pactSlots.slotLevel,
+    };
+  }
+
+  return result;
 }
 
 /**

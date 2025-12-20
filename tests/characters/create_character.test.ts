@@ -183,7 +183,7 @@ describe('create_character', () => {
       });
       expect(result.isError).toBe(true);
       const text = getTextContent(result);
-      expect(text).toContain('Error');
+      expect(text).toMatch(/Error|ERROR/i);
     });
 
     it('should reject ability scores above 30', async () => {
@@ -200,7 +200,7 @@ describe('create_character', () => {
       });
       expect(result.isError).toBe(true);
       const text = getTextContent(result);
-      expect(text).toContain('Error');
+      expect(text).toMatch(/Error|ERROR/i);
     });
 
     it('should reject missing name', async () => {

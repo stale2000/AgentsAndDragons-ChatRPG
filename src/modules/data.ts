@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Data Module - Location Graph & Session Data Management
  *
  * Handles location graph for party navigation, session notes,
@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { randomUUID } from 'crypto';
 import { createBox, centerText, BOX } from './ascii-art.js';
 import { getCharacter } from './characters.js';
+import { fuzzyEnum } from '../fuzzy-enum.js';
 
 // ============================================================
 // CONSTANTS
@@ -23,20 +24,22 @@ const DISPLAY_WIDTH = 50;
 const MAX_NAME_LENGTH = 100;
 
 /** Arrow symbol for connections */
-const ARROW = '→';
+const ARROW = 'â†’';
 
 /** Bullet symbol for lists */
-const BULLET = '•';
+const BULLET = 'â€¢';
 
 // ============================================================
 // SCHEMAS
 // ============================================================
 
-/** Lighting levels for locations */
-const LightingSchema = z.enum(['bright', 'dim', 'darkness']);
+/** Valid lighting values */
+const LIGHTING_VALUES = ['bright', 'dim', 'darkness'] as const;
+/** Lighting levels for locations (fuzzy matching) */
+const LightingSchema = fuzzyEnum(LIGHTING_VALUES, 'lighting');
 
-/** Location types for classification */
-const LocationTypeSchema = z.enum([
+/** Valid location type values */
+const LOCATION_TYPE_VALUES = [
   'town',
   'dungeon',
   'wilderness',
@@ -45,20 +48,17 @@ const LocationTypeSchema = z.enum([
   'underground',
   'planar',
   'other',
-]);
+] as const;
+/** Location types for classification (fuzzy matching) */
+const LocationTypeSchema = fuzzyEnum(LOCATION_TYPE_VALUES, 'locationType');
 
-/** Size classifications for locations */
-const LocationSizeSchema = z.enum([
-  'tiny',
-  'small',
-  'medium',
-  'large',
-  'huge',
-  'gargantuan',
-]);
+/** Valid size values */
+const SIZE_VALUES = ['tiny', 'small', 'medium', 'large', 'huge', 'gargantuan'] as const;
+/** Size classifications for locations (fuzzy matching) */
+const LocationSizeSchema = fuzzyEnum(SIZE_VALUES, 'size');
 
-/** Terrain types */
-const TerrainSchema = z.enum([
+/** Valid terrain values */
+const TERRAIN_VALUES = [
   'urban',
   'forest',
   'mountain',
@@ -69,7 +69,9 @@ const TerrainSchema = z.enum([
   'underground',
   'planar',
   'other',
-]);
+] as const;
+/** Terrain types (fuzzy matching) */
+const TerrainSchema = fuzzyEnum(TERRAIN_VALUES, 'terrain');
 
 /** Connection types between locations */
 const ConnectionTypeSchema = z.enum([
@@ -1648,3 +1650,1262 @@ export function getPartyLocationId(): string | null {
 export function clearPartyMembers(): void {
   partyMemberStore.clear();
 }
+
+// ============================================================
+// MANAGE_INVENTORY
+// ============================================================
+
+/** Item types */
+const ItemTypeSchema = z.enum([
+  'weapon',
+  'armor',
+  'shield',
+  'consumable',
+  'ammunition',
+  'equipment',
+  'currency',
+  'misc',
+]);
+
+/** Equipment slots */
+const EquipmentSlotSchema = z.enum([
+  'mainHand',
+  'offHand',
+  'armor',
+  'head',
+  'hands',
+  'feet',
+  'neck',
+  'ring1',
+  'ring2',
+]);
+
+/** Inventory item data */
+interface InventoryItem {
+  id: string;
+  name: string;
+  type: z.infer<typeof ItemTypeSchema>;
+  quantity: number;
+  weight?: number;
+  value?: number;
+  description?: string;
+  properties?: string[];
+  damage?: string;
+  damageType?: string;
+  ac?: number;
+  container?: string;
+  equipped?: z.infer<typeof EquipmentSlotSchema>;
+}
+
+/** Character inventory storage */
+const inventoryStore = new Map<string, InventoryItem[]>();
+
+/** Character equipment storage */
+const equipmentStore = new Map<string, Map<string, string>>();
+
+// ============================================================
+// MANAGE_INVENTORY SCHEMAS
+// ============================================================
+
+/** Item schema for give operation */
+const itemSchema = z.object({
+  name: z.string().min(1),
+  type: ItemTypeSchema,
+  quantity: z.number().int().min(1),
+  weight: z.number().optional(),
+  value: z.number().optional(),
+  description: z.string().optional(),
+  properties: z.array(z.string()).optional(),
+  damage: z.string().optional(),
+  damageType: z.string().optional(),
+  ac: z.number().optional(),
+  container: z.string().optional(),
+});
+
+/** Give operation schema */
+const giveOperationSchema = z.object({
+  operation: z.literal('give'),
+  characterId: z.string().optional(),
+  characterName: z.string().optional(),
+  item: itemSchema,
+});
+
+/** Take operation schema */
+const takeOperationSchema = z.object({
+  operation: z.literal('take'),
+  characterId: z.string().optional(),
+  characterName: z.string().optional(),
+  itemName: z.string(),
+  quantity: z.number().int().min(1).optional().default(1),
+});
+
+/** Equip operation schema */
+const equipOperationSchema = z.object({
+  operation: z.literal('equip'),
+  characterId: z.string().optional(),
+  characterName: z.string().optional(),
+  itemName: z.string(),
+  slot: EquipmentSlotSchema,
+});
+
+/** Unequip operation schema */
+const unequipOperationSchema = z.object({
+  operation: z.literal('unequip'),
+  characterId: z.string().optional(),
+  characterName: z.string().optional(),
+  itemName: z.string().optional(),
+  slot: EquipmentSlotSchema.optional(),
+});
+
+/** Move operation schema */
+const moveItemOperationSchema = z.object({
+  operation: z.literal('move'),
+  characterId: z.string().optional(),
+  characterName: z.string().optional(),
+  itemName: z.string(),
+  fromContainer: z.string().optional(),
+  toContainer: z.string(),
+  quantity: z.number().int().min(1).optional(),
+});
+
+/** List operation schema */
+const listInventoryOperationSchema = z.object({
+  operation: z.literal('list'),
+  characterId: z.string().optional(),
+  characterName: z.string().optional(),
+  filterType: ItemTypeSchema.optional(),
+});
+
+/** Transfer operation schema */
+const transferOperationSchema = z.object({
+  operation: z.literal('transfer'),
+  characterId: z.string().optional(),
+  characterName: z.string().optional(),
+  toCharacterId: z.string().optional(),
+  toCharacterName: z.string().optional(),
+  itemName: z.string(),
+  quantity: z.number().int().min(1).optional().default(1),
+});
+
+/** Single inventory operation schema */
+const singleInventoryOperationSchema = z.discriminatedUnion('operation', [
+  giveOperationSchema,
+  takeOperationSchema,
+  equipOperationSchema,
+  unequipOperationSchema,
+  moveItemOperationSchema,
+  listInventoryOperationSchema,
+  transferOperationSchema,
+]);
+
+/** Batch operation schema */
+const batchInventoryOperationSchema = z.object({
+  batch: z.array(singleInventoryOperationSchema).max(20),
+});
+
+/** Combined schema for manage_inventory */
+export const manageInventorySchema = z.union([
+  singleInventoryOperationSchema,
+  batchInventoryOperationSchema,
+]);
+
+// ============================================================
+// MANAGE_INVENTORY HELPER FUNCTIONS
+// ============================================================
+
+/**
+ * Get inventory for a character (by ID)
+ */
+function getInventory(characterId: string): InventoryItem[] {
+  if (!inventoryStore.has(characterId)) {
+    inventoryStore.set(characterId, []);
+  }
+  return inventoryStore.get(characterId)!;
+}
+
+/**
+ * Get equipment for a character (by ID)
+ */
+function getEquipment(characterId: string): Map<string, string> {
+  if (!equipmentStore.has(characterId)) {
+    equipmentStore.set(characterId, new Map());
+  }
+  return equipmentStore.get(characterId)!;
+}
+
+/**
+ * Find item in inventory by name (case-insensitive)
+ */
+function findItem(inventory: InventoryItem[], itemName: string, container?: string): InventoryItem | undefined {
+  const lowerName = itemName.toLowerCase();
+  return inventory.find(item => {
+    if (item.name.toLowerCase() !== lowerName) return false;
+    if (container !== undefined && item.container !== container) return false;
+    return true;
+  });
+}
+
+/**
+ * Resolve character and get ID
+ */
+function resolveInventoryCharacter(characterId?: string, characterName?: string): { id: string | null; name: string; error?: string } {
+  if (!characterId && !characterName) {
+    return { id: null, name: '', error: 'Either characterId or characterName is required' };
+  }
+
+  const result = getCharacter({ characterId, characterName });
+  if (!result.success || !result.character) {
+    return { id: null, name: '', error: `Character not found: ${characterName || characterId}` };
+  }
+
+  return { id: result.character.id, name: result.character.name };
+}
+
+// ============================================================
+// MANAGE_INVENTORY OPERATION HANDLERS
+// ============================================================
+
+/**
+ * Handle give operation - Add item to inventory
+ */
+function handleInventoryGive(input: z.infer<typeof giveOperationSchema>): string {
+  const resolved = resolveInventoryCharacter(input.characterId, input.characterName);
+  if (!resolved.id) {
+    return createBox('ERROR', [resolved.error || 'Character not found'], DISPLAY_WIDTH);
+  }
+
+  const inventory = getInventory(resolved.id);
+  const item = input.item;
+
+  // Check if identical item exists (stack)
+  const existing = inventory.find(i => 
+    i.name.toLowerCase() === item.name.toLowerCase() && 
+    i.type === item.type &&
+    i.container === item.container
+  );
+
+  if (existing) {
+    existing.quantity += item.quantity;
+    const lines: string[] = [];
+    lines.push(`Character: ${resolved.name}`);
+    lines.push(`Item: ${existing.name}`);
+    lines.push(`Type: ${existing.type}`);
+    lines.push(`New Total: ${existing.quantity}`);
+    return createBox('ITEM ADDED', lines, DISPLAY_WIDTH);
+  }
+
+  // Create new item
+  const newItem: InventoryItem = {
+    id: randomUUID(),
+    name: item.name,
+    type: item.type,
+    quantity: item.quantity,
+    weight: item.weight,
+    value: item.value,
+    description: item.description,
+    properties: item.properties,
+    damage: item.damage,
+    damageType: item.damageType,
+    ac: item.ac,
+    container: item.container,
+  };
+
+  inventory.push(newItem);
+
+  const lines: string[] = [];
+  lines.push(`Character: ${resolved.name}`);
+  lines.push(`Item: ${newItem.name}`);
+  lines.push(`Type: ${newItem.type}`);
+  lines.push(`Quantity: ${newItem.quantity}`);
+  if (newItem.weight) lines.push(`Weight: ${newItem.weight} lb`);
+  if (newItem.value) lines.push(`Value: ${newItem.value} gp`);
+
+  return createBox('ITEM ADDED', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Handle take operation - Remove item from inventory
+ */
+function handleInventoryTake(input: z.infer<typeof takeOperationSchema>): string {
+  const resolved = resolveInventoryCharacter(input.characterId, input.characterName);
+  if (!resolved.id) {
+    return createBox('ERROR', [resolved.error || 'Character not found'], DISPLAY_WIDTH);
+  }
+
+  const inventory = getInventory(resolved.id);
+  const item = findItem(inventory, input.itemName);
+
+  if (!item) {
+    return createBox('ERROR', [`Item not found: ${input.itemName}`], DISPLAY_WIDTH);
+  }
+
+  const quantity = input.quantity;
+
+  if (item.quantity < quantity) {
+    return createBox('ERROR', [`insufficient quantity: have ${item.quantity}, need ${quantity}`], DISPLAY_WIDTH);
+  }
+
+  item.quantity -= quantity;
+  const remaining = item.quantity;
+
+  // Remove if quantity is 0
+  if (item.quantity <= 0) {
+    const index = inventory.indexOf(item);
+    if (index > -1) {
+      inventory.splice(index, 1);
+    }
+  }
+
+  const lines: string[] = [];
+  lines.push(`Character: ${resolved.name}`);
+  lines.push(`Item: ${item.name}`);
+  lines.push(`Removed: ${quantity}`);
+  lines.push(`Remaining: ${remaining}`);
+
+  return createBox('ITEM REMOVED', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Handle equip operation - Equip item to slot
+ */
+function handleInventoryEquip(input: z.infer<typeof equipOperationSchema>): string {
+  const resolved = resolveInventoryCharacter(input.characterId, input.characterName);
+  if (!resolved.id) {
+    return createBox('ERROR', [resolved.error || 'Character not found'], DISPLAY_WIDTH);
+  }
+
+  const inventory = getInventory(resolved.id);
+  const item = findItem(inventory, input.itemName);
+
+  if (!item) {
+    return createBox('ERROR', [`Item not found: ${input.itemName}`], DISPLAY_WIDTH);
+  }
+
+  const equipment = getEquipment(resolved.id);
+  const slot = input.slot;
+
+  // Check if something already equipped in that slot
+  const previousItemId = equipment.get(slot);
+  let previousItemName: string | undefined;
+
+  if (previousItemId) {
+    const prevItem = inventory.find(i => i.id === previousItemId);
+    if (prevItem) {
+      previousItemName = prevItem.name;
+      prevItem.equipped = undefined;
+    }
+  }
+
+  // Equip new item
+  equipment.set(slot, item.id);
+  item.equipped = slot;
+
+  const lines: string[] = [];
+  lines.push(`Character: ${resolved.name}`);
+  lines.push(`Item: ${item.name}`);
+  lines.push(`Slot: ${slot}`);
+  if (previousItemName) {
+    lines.push(`Unequipped: ${previousItemName}`);
+  }
+
+  return createBox('ITEM EQUIPPED', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Handle unequip operation - Remove item from equipment slot
+ */
+function handleInventoryUnequip(input: z.infer<typeof unequipOperationSchema>): string {
+  const resolved = resolveInventoryCharacter(input.characterId, input.characterName);
+  if (!resolved.id) {
+    return createBox('ERROR', [resolved.error || 'Character not found'], DISPLAY_WIDTH);
+  }
+
+  const inventory = getInventory(resolved.id);
+  const equipment = getEquipment(resolved.id);
+
+  let targetItem: InventoryItem | undefined;
+  let targetSlot: string | undefined;
+
+  if (input.itemName) {
+    // Find by item name
+    targetItem = findItem(inventory, input.itemName);
+    if (!targetItem) {
+      return createBox('ERROR', [`Item not found: ${input.itemName}`], DISPLAY_WIDTH);
+    }
+    if (!targetItem.equipped) {
+      return createBox('ERROR', [`Item is not equipped: ${input.itemName}`], DISPLAY_WIDTH);
+    }
+    targetSlot = targetItem.equipped;
+  } else if (input.slot) {
+    // Find by slot
+    targetSlot = input.slot;
+    const itemId = equipment.get(input.slot);
+    if (!itemId) {
+      return createBox('ERROR', [`Slot is empty: ${input.slot}`], DISPLAY_WIDTH);
+    }
+    targetItem = inventory.find(i => i.id === itemId);
+  } else {
+    return createBox('ERROR', ['Either itemName or slot is required'], DISPLAY_WIDTH);
+  }
+
+  if (!targetItem || !targetSlot) {
+    return createBox('ERROR', ['Could not find item to unequip'], DISPLAY_WIDTH);
+  }
+
+  // Unequip
+  equipment.delete(targetSlot);
+  targetItem.equipped = undefined;
+
+  const lines: string[] = [];
+  lines.push(`Character: ${resolved.name}`);
+  lines.push(`Item: ${targetItem.name}`);
+  lines.push(`Slot: ${targetSlot}`);
+
+  return createBox('ITEM UNEQUIPPED', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Handle move operation - Move item between containers
+ */
+function handleInventoryMove(input: z.infer<typeof moveItemOperationSchema>): string {
+  const resolved = resolveInventoryCharacter(input.characterId, input.characterName);
+  if (!resolved.id) {
+    return createBox('ERROR', [resolved.error || 'Character not found'], DISPLAY_WIDTH);
+  }
+
+  const inventory = getInventory(resolved.id);
+  const item = findItem(inventory, input.itemName, input.fromContainer);
+
+  if (!item) {
+    const containerInfo = input.fromContainer ? ` in ${input.fromContainer}` : '';
+    return createBox('ERROR', [`Item not found: ${input.itemName}${containerInfo}`], DISPLAY_WIDTH);
+  }
+
+  const quantity = input.quantity || item.quantity;
+  const fromContainer = item.container || 'general inventory';
+  const toContainer = input.toContainer;
+
+  if (quantity > item.quantity) {
+    return createBox('ERROR', [`insufficient quantity: have ${item.quantity}, need ${quantity}`], DISPLAY_WIDTH);
+  }
+
+  // If moving all, just change container
+  if (quantity === item.quantity) {
+    item.container = toContainer;
+  } else {
+    // Split the stack
+    item.quantity -= quantity;
+    
+    // Check if target container already has this item
+    const existing = inventory.find(i => 
+      i.name.toLowerCase() === item.name.toLowerCase() && 
+      i.type === item.type &&
+      i.container === toContainer
+    );
+
+    if (existing) {
+      existing.quantity += quantity;
+    } else {
+      const newItem: InventoryItem = {
+        ...item,
+        id: randomUUID(),
+        quantity: quantity,
+        container: toContainer,
+        equipped: undefined,
+      };
+      inventory.push(newItem);
+    }
+  }
+
+  const lines: string[] = [];
+  lines.push(`Character: ${resolved.name}`);
+  lines.push(`Item: ${item.name}`);
+  lines.push(`Quantity: ${quantity}`);
+  lines.push(`From: ${fromContainer}`);
+  lines.push(`To: ${toContainer}`);
+
+  return createBox('ITEM MOVED', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Handle list operation - List inventory contents
+ */
+function handleInventoryList(input: z.infer<typeof listInventoryOperationSchema>): string {
+  const resolved = resolveInventoryCharacter(input.characterId, input.characterName);
+  if (!resolved.id) {
+    return createBox('ERROR', [resolved.error || 'Character not found'], DISPLAY_WIDTH);
+  }
+
+  const inventory = getInventory(resolved.id);
+  let filteredItems = inventory;
+
+  if (input.filterType) {
+    filteredItems = inventory.filter(i => i.type === input.filterType);
+  }
+
+  const lines: string[] = [];
+  lines.push(`Character: ${resolved.name}`);
+  lines.push('');
+
+  if (filteredItems.length === 0) {
+    lines.push('Inventory is empty.');
+    return createBox('INVENTORY', lines, DISPLAY_WIDTH);
+  }
+
+  // Calculate total weight
+  let totalWeight = 0;
+  
+  // Group by container
+  const byContainer = new Map<string, InventoryItem[]>();
+  for (const item of filteredItems) {
+    const container = item.container || 'General';
+    if (!byContainer.has(container)) {
+      byContainer.set(container, []);
+    }
+    byContainer.get(container)!.push(item);
+    if (item.weight) {
+      totalWeight += item.weight * item.quantity;
+    }
+  }
+
+  for (const [container, items] of byContainer.entries()) {
+    if (byContainer.size > 1) {
+      lines.push(`[${container}]`);
+    }
+    
+    for (const item of items) {
+      let line = `${BULLET} ${item.name}`;
+      if (item.quantity > 1) {
+        line += ` (x${item.quantity})`;
+      }
+      if (item.equipped) {
+        line += ` [equipped: ${item.equipped}]`;
+      }
+      lines.push(line);
+    }
+    
+    if (byContainer.size > 1) {
+      lines.push('');
+    }
+  }
+
+  if (totalWeight > 0) {
+    lines.push('');
+    lines.push(`Total Weight: ${totalWeight} lb`);
+  }
+
+  return createBox('INVENTORY', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Handle transfer operation - Transfer item between characters
+ */
+function handleInventoryTransfer(input: z.infer<typeof transferOperationSchema>): string {
+  // Resolve source character
+  const source = resolveInventoryCharacter(input.characterId, input.characterName);
+  if (!source.id) {
+    return createBox('ERROR', [source.error || 'Source character not found'], DISPLAY_WIDTH);
+  }
+
+  // Resolve target character
+  const target = resolveInventoryCharacter(input.toCharacterId, input.toCharacterName);
+  if (!target.id) {
+    return createBox('ERROR', [target.error || 'Target character not found'], DISPLAY_WIDTH);
+  }
+
+  const sourceInventory = getInventory(source.id);
+  const item = findItem(sourceInventory, input.itemName);
+
+  if (!item) {
+    return createBox('ERROR', [`Item not found: ${input.itemName}`], DISPLAY_WIDTH);
+  }
+
+  const quantity = input.quantity;
+
+  if (item.quantity < quantity) {
+    return createBox('ERROR', [`insufficient quantity: have ${item.quantity}, need ${quantity}`], DISPLAY_WIDTH);
+  }
+
+  // Remove from source
+  item.quantity -= quantity;
+  if (item.quantity <= 0) {
+    const index = sourceInventory.indexOf(item);
+    if (index > -1) {
+      sourceInventory.splice(index, 1);
+    }
+  }
+
+  // Add to target
+  const targetInventory = getInventory(target.id);
+  const existingInTarget = targetInventory.find(i => 
+    i.name.toLowerCase() === item.name.toLowerCase() && 
+    i.type === item.type
+  );
+
+  if (existingInTarget) {
+    existingInTarget.quantity += quantity;
+  } else {
+    const newItem: InventoryItem = {
+      ...item,
+      id: randomUUID(),
+      quantity: quantity,
+      equipped: undefined,
+    };
+    targetInventory.push(newItem);
+  }
+
+  const lines: string[] = [];
+  lines.push(`Item: ${item.name}`);
+  lines.push(`Quantity: ${quantity}`);
+  lines.push(`From: ${source.name}`);
+  lines.push(`To: ${target.name}`);
+
+  return createBox('ITEM TRANSFERRED', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Process single inventory operation
+ */
+function processSingleOperation(op: z.infer<typeof singleInventoryOperationSchema>): string {
+  switch (op.operation) {
+    case 'give':
+      return handleInventoryGive(op);
+    case 'take':
+      return handleInventoryTake(op);
+    case 'equip':
+      return handleInventoryEquip(op);
+    case 'unequip':
+      return handleInventoryUnequip(op);
+    case 'move':
+      return handleInventoryMove(op);
+    case 'list':
+      return handleInventoryList(op);
+    case 'transfer':
+      return handleInventoryTransfer(op);
+    default:
+      return createBox('ERROR', ['Unknown operation'], DISPLAY_WIDTH);
+  }
+}
+
+// ============================================================
+// MANAGE_INVENTORY MAIN HANDLER
+// ============================================================
+
+/**
+ * Main handler for manage_inventory tool
+ */
+export async function manageInventory(input: unknown): Promise<{ content: { type: 'text'; text: string }[] }> {
+  try {
+    const parsed = manageInventorySchema.parse(input);
+
+    // Check if batch operation
+    if ('batch' in parsed) {
+      const results: { success: boolean; result: string }[] = [];
+      
+      for (const op of parsed.batch) {
+        try {
+          const result = processSingleOperation(op);
+          const isError = result.includes('ERROR');
+          results.push({ success: !isError, result });
+        } catch (err) {
+          results.push({ 
+            success: false, 
+            result: createBox('ERROR', [err instanceof Error ? err.message : 'Unknown error'], DISPLAY_WIDTH) 
+          });
+        }
+      }
+
+      const successCount = results.filter(r => r.success).length;
+      const failCount = results.filter(r => !r.success).length;
+
+      const lines: string[] = [];
+      lines.push(`Operations: ${parsed.batch.length}`);
+      lines.push(`Successful: ${successCount}`);
+      lines.push(`Failed: ${failCount}`);
+
+      return { content: [{ type: 'text' as const, text: createBox('BATCH COMPLETE', lines, DISPLAY_WIDTH) }] };
+    }
+
+    // Single operation
+    const result = processSingleOperation(parsed);
+    return { content: [{ type: 'text' as const, text: result }] };
+  } catch (error) {
+    const lines: string[] = [];
+
+    if (error instanceof z.ZodError) {
+      for (const issue of error.issues) {
+        lines.push(`${issue.path.join('.')}: ${issue.message}`);
+      }
+    } else if (error instanceof Error) {
+      lines.push(error.message);
+    } else {
+      lines.push('An unknown error occurred');
+    }
+
+    return { content: [{ type: 'text' as const, text: createBox('ERROR', lines, DISPLAY_WIDTH) }] };
+  }
+}
+
+/**
+ * Clear inventory data (for testing)
+ */
+export function clearInventoryData(): void {
+  inventoryStore.clear();
+  equipmentStore.clear();
+}
+
+// ============================================================
+// MANAGE_NOTES
+// ============================================================
+
+/** Importance levels for notes */
+const ImportanceSchema = z.enum(['low', 'medium', 'high', 'critical']);
+
+/** Note interface */
+interface Note {
+  id: string;
+  content: string;
+  tags: string[];
+  importance: z.infer<typeof ImportanceSchema>;
+  createdAt: Date;
+}
+
+/** Notes storage */
+const notesStore = new Map<string, Note>();
+
+// ============================================================
+// MANAGE_NOTES SCHEMAS
+// ============================================================
+
+/** Add operation schema */
+const addNoteOperationSchema = z.object({
+  operation: z.literal('add'),
+  content: z.string().min(1, 'Content is required'),
+  tags: z.array(z.string()).optional(),
+  importance: ImportanceSchema.optional().default('medium'),
+});
+
+/** Search operation schema */
+const searchNoteOperationSchema = z.object({
+  operation: z.literal('search'),
+  query: z.string().optional(),
+  tagFilter: z.array(z.string()).optional(),
+});
+
+/** Get operation schema */
+const getNoteOperationSchema = z.object({
+  operation: z.literal('get'),
+  noteId: z.string(),
+});
+
+/** Delete operation schema */
+const deleteNoteOperationSchema = z.object({
+  operation: z.literal('delete'),
+  noteId: z.string(),
+});
+
+/** List operation schema */
+const listNoteOperationSchema = z.object({
+  operation: z.literal('list'),
+  limit: z.number().int().min(1).optional(),
+});
+
+/** Combined schema for manage_notes using discriminatedUnion */
+export const manageNotesSchema = z.discriminatedUnion('operation', [
+  addNoteOperationSchema,
+  searchNoteOperationSchema,
+  getNoteOperationSchema,
+  deleteNoteOperationSchema,
+  listNoteOperationSchema,
+]);
+
+// ============================================================
+// MANAGE_NOTES OPERATION HANDLERS
+// ============================================================
+
+/**
+ * Handle add operation - Add a new session note
+ */
+function handleNoteAdd(input: z.infer<typeof addNoteOperationSchema>): string {
+  const note: Note = {
+    id: randomUUID(),
+    content: input.content,
+    tags: input.tags || [],
+    importance: input.importance,
+    createdAt: new Date(),
+  };
+
+  notesStore.set(note.id, note);
+
+  const lines: string[] = [];
+  lines.push(`ID: ${note.id}`);
+  lines.push('');
+  lines.push(note.content.length > 40 ? note.content.substring(0, 40) + '...' : note.content);
+  lines.push('');
+  if (note.tags.length > 0) {
+    lines.push(`Tags: ${note.tags.join(', ')}`);
+  }
+  lines.push(`Importance: ${note.importance}`);
+
+  return createBox('NOTE ADDED', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Handle search operation - Search notes by query and/or tags
+ */
+function handleNoteSearch(input: z.infer<typeof searchNoteOperationSchema>): string {
+  const query = input.query?.toLowerCase();
+  const tagFilter = input.tagFilter;
+
+  const matchingNotes: Note[] = [];
+
+  for (const note of notesStore.values()) {
+    let matches = true;
+
+    // Check query match (case-insensitive)
+    if (query) {
+      if (!note.content.toLowerCase().includes(query)) {
+        matches = false;
+      }
+    }
+
+    // Check tag filter (AND logic - all tags must be present)
+    if (tagFilter && tagFilter.length > 0) {
+      const noteTags = note.tags.map(t => t.toLowerCase());
+      for (const tag of tagFilter) {
+        if (!noteTags.includes(tag.toLowerCase())) {
+          matches = false;
+          break;
+        }
+      }
+    }
+
+    if (matches) {
+      matchingNotes.push(note);
+    }
+  }
+
+  const lines: string[] = [];
+
+  if (matchingNotes.length === 0) {
+    lines.push('No notes found matching the criteria.');
+    return createBox('SEARCH RESULTS', lines, DISPLAY_WIDTH);
+  }
+
+  lines.push(`Found: ${matchingNotes.length} note${matchingNotes.length !== 1 ? 's' : ''}`);
+  lines.push('');
+
+  // Sort by createdAt descending (most recent first)
+  matchingNotes.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+  for (const note of matchingNotes) {
+    const preview = note.content.length > 35 ? note.content.substring(0, 35) + '...' : note.content;
+    lines.push(`${BULLET} ${preview}`);
+    if (note.tags.length > 0) {
+      lines.push(`  [${note.tags.join(', ')}]`);
+    }
+  }
+
+  return createBox('SEARCH RESULTS', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Handle get operation - Get a specific note by ID
+ */
+function handleNoteGet(input: z.infer<typeof getNoteOperationSchema>): string {
+  const note = notesStore.get(input.noteId);
+
+  if (!note) {
+    return createBox('ERROR', [`Note not found: ${input.noteId}`], DISPLAY_WIDTH);
+  }
+
+  const lines: string[] = [];
+  lines.push(`ID: ${note.id}`);
+  lines.push('');
+  lines.push(note.content);
+  lines.push('');
+  if (note.tags.length > 0) {
+    lines.push(`Tags: ${note.tags.join(', ')}`);
+  }
+  lines.push(`Importance: ${note.importance}`);
+  lines.push(`Created: ${note.createdAt.toISOString()}`);
+
+  return createBox('SESSION NOTE', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Handle delete operation - Remove a note by ID
+ */
+function handleNoteDelete(input: z.infer<typeof deleteNoteOperationSchema>): string {
+  const note = notesStore.get(input.noteId);
+
+  if (!note) {
+    return createBox('ERROR', [`Note not found: ${input.noteId}`], DISPLAY_WIDTH);
+  }
+
+  notesStore.delete(input.noteId);
+
+  const lines: string[] = [];
+  lines.push(`ID: ${input.noteId}`);
+  lines.push('');
+  const preview = note.content.length > 40 ? note.content.substring(0, 40) + '...' : note.content;
+  lines.push(`Content: ${preview}`);
+
+  return createBox('NOTE DELETED', lines, DISPLAY_WIDTH);
+}
+
+/**
+ * Handle list operation - List recent notes with optional limit
+ */
+function handleNoteList(input: z.infer<typeof listNoteOperationSchema>): string {
+  const lines: string[] = [];
+
+  if (notesStore.size === 0) {
+    lines.push('No notes.');
+    lines.push('');
+    lines.push('Total: 0');
+    return createBox('NOTES', lines, DISPLAY_WIDTH);
+  }
+
+  // Get all notes and sort by createdAt descending
+  const allNotes = Array.from(notesStore.values());
+  allNotes.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+  // Apply limit if specified
+  const limit = input.limit || allNotes.length;
+  const displayNotes = allNotes.slice(0, limit);
+
+  lines.push(`Total: ${notesStore.size} note${notesStore.size !== 1 ? 's' : ''}`);
+  lines.push('');
+
+  for (const note of displayNotes) {
+    const preview = note.content.length > 30 ? note.content.substring(0, 30) + '...' : note.content;
+    let marker = '';
+    if (note.importance === 'critical') {
+      marker = ' [!]';
+    } else if (note.importance === 'high') {
+      marker = ' [*]';
+    }
+    lines.push(`${BULLET} ${preview}${marker}`);
+  }
+
+  return createBox('NOTES', lines, DISPLAY_WIDTH);
+}
+
+// ============================================================
+// MANAGE_NOTES MAIN HANDLER
+// ============================================================
+
+/**
+ * Main handler for manage_notes tool
+ */
+export async function manageNotes(input: unknown): Promise<{ content: { type: 'text'; text: string }[] }> {
+  try {
+    const parsed = manageNotesSchema.parse(input);
+
+    let result: string;
+
+    switch (parsed.operation) {
+      case 'add':
+        result = handleNoteAdd(parsed);
+        break;
+      case 'search':
+        result = handleNoteSearch(parsed);
+        break;
+      case 'get':
+        result = handleNoteGet(parsed);
+        break;
+      case 'delete':
+        result = handleNoteDelete(parsed);
+        break;
+      case 'list':
+        result = handleNoteList(parsed);
+        break;
+      default:
+        result = createBox('ERROR', ['Unknown operation'], DISPLAY_WIDTH);
+    }
+
+    return { content: [{ type: 'text' as const, text: result }] };
+  } catch (error) {
+    const lines: string[] = [];
+
+    if (error instanceof z.ZodError) {
+      for (const issue of error.issues) {
+        lines.push(`${issue.path.join('.')}: ${issue.message}`);
+      }
+    } else if (error instanceof Error) {
+      lines.push(error.message);
+    } else {
+      lines.push('An unknown error occurred');
+    }
+
+    return { content: [{ type: 'text' as const, text: createBox('ERROR', lines, DISPLAY_WIDTH) }] };
+  }
+}
+
+/**
+ * Clear all notes (for testing)
+ */
+export function clearAllNotes(): void {
+  notesStore.clear();
+}
+
+// ============================================================
+// GET SESSION CONTEXT TOOL
+// ============================================================
+
+/**
+ * Schema for get_session_context tool
+ */
+export const getSessionContextSchema = z.object({
+  include: z.array(z.enum(['location', 'party', 'notes', 'combat', 'summary'])).optional(),
+  format: z.enum(['detailed', 'compact', 'brief']).optional(),
+  maxNotes: z.number().int().positive().optional(),
+  includeTimestamps: z.boolean().optional(),
+});
+
+type SessionContextInput = z.infer<typeof getSessionContextSchema>;
+
+/**
+ * Get current location context
+ */
+function getLocationContext(format: string): string[] {
+  const lines: string[] = [];
+  const locationId = partyState.currentLocationId;
+  const location = locationId ? locationStore.get(locationId) : null;
+
+  if (!location) {
+    lines.push('📍 Location: Not set');
+    return lines;
+  }
+
+  if (format === 'brief') {
+    lines.push(`📍 ${location.name}`);
+  } else if (format === 'compact') {
+    lines.push(`📍 ${location.name}${location.locationType ? ` (${location.locationType})` : ''}`);
+  } else {
+    // detailed
+    lines.push(`📍 LOCATION: ${location.name}`);
+    if (location.locationType) {
+      lines.push(`   Type: ${location.locationType}`);
+    }
+    if (location.description) {
+      lines.push(`   ${location.description}`);
+    }
+    if (location.terrain) {
+      lines.push(`   Terrain: ${location.terrain}`);
+    }
+    if (location.lighting) {
+      lines.push(`   Lighting: ${location.lighting}`);
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Get current party context
+ */
+function getPartyContext(format: string): string[] {
+  const lines: string[] = [];
+  const members = Array.from(partyMemberStore.values());
+
+  if (members.length === 0) {
+    lines.push('👥 Party: 0 members');
+    return lines;
+  }
+
+  // Helper to get character name
+  const getName = (characterId: string): string => {
+    const result = getCharacter({ characterId });
+    return result.character?.name || characterId;
+  };
+
+  if (format === 'brief') {
+    const names = members.map(m => getName(m.characterId)).join(', ');
+    lines.push(`👥 Party (${members.length}): ${names}`);
+  } else if (format === 'compact') {
+    lines.push(`👥 Party: ${members.length} members`);
+    for (const m of members) {
+      const name = getName(m.characterId);
+      lines.push(`   • ${name}${m.role ? ` (${m.role})` : ''}`);
+    }
+  } else {
+    // detailed
+    lines.push(`👥 PARTY: ${members.length} members`);
+    for (const m of members) {
+      const name = getName(m.characterId);
+      const result = getCharacter({ characterId: m.characterId });
+      const char = result.character;
+      lines.push(`   • ${name}`);
+      if (char) {
+        lines.push(`     ${char.class} (Level ${char.level})`);
+      }
+      if (m.role) lines.push(`     Role: ${m.role}`);
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Get notes context
+ */
+function getNotesContext(format: string, maxNotes?: number, includeTimestamps?: boolean): string[] {
+  const lines: string[] = [];
+  let notes = Array.from(notesStore.values());
+
+  if (notes.length === 0) {
+    lines.push('📝 Notes: 0 notes');
+    return lines;
+  }
+
+  // Sort by importance (critical > high > medium > low)
+  const importanceOrder: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+  notes.sort((a, b) => (importanceOrder[b.importance] || 0) - (importanceOrder[a.importance] || 0));
+
+  // Apply limit
+  if (maxNotes && maxNotes > 0) {
+    notes = notes.slice(0, maxNotes);
+  }
+
+  if (format === 'brief') {
+    lines.push(`📝 Notes: ${notes.length}`);
+    if (notes.length > 0) {
+      const truncated = notes[0].content.substring(0, 50);
+      lines.push(`   "${truncated}${notes[0].content.length > 50 ? '...' : ''}"`);
+    }
+  } else if (format === 'compact') {
+    lines.push(`📝 Notes: ${notes.length}`);
+    for (const note of notes.slice(0, 3)) {
+      const truncated = note.content.substring(0, 40);
+      const ts = includeTimestamps ? ` [${formatTimestamp(note.createdAt)}]` : '';
+      lines.push(`   • ${truncated}${note.content.length > 40 ? '...' : ''}${ts}`);
+    }
+  } else {
+    // detailed
+    lines.push(`📝 NOTES: ${notes.length} total`);
+    for (const note of notes) {
+      const truncated = note.content.substring(0, 60);
+      lines.push(`   [${note.importance.toUpperCase()}] ${truncated}${note.content.length > 60 ? '...' : ''}`);
+      if (note.tags && note.tags.length > 0) {
+        lines.push(`      Tags: ${note.tags.join(', ')}`);
+      }
+      if (includeTimestamps) {
+        lines.push(`      Created: ${formatTimestamp(note.createdAt)}`);
+      }
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Format timestamp for display
+ */
+function formatTimestamp(date: Date): string {
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const minutes = Math.floor(diff / 60000);
+
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return date.toLocaleDateString();
+}
+
+/**
+ * Get combat context
+ */
+function getCombatContext(format: string): string[] {
+  const lines: string[] = [];
+  // No active combat tracking in data module - would come from combat module
+  lines.push('⚔️ Combat: No active encounter');
+  return lines;
+}
+
+/**
+ * Get session summary
+ */
+function getSummaryContext(): string[] {
+  const lines: string[] = [];
+  lines.push('📋 SUMMARY');
+  const locationId = partyState.currentLocationId;
+  const location = locationId ? locationStore.get(locationId) : null;
+  const memberCount = partyMemberStore.size;
+  const noteCount = notesStore.size;
+
+  if (location) {
+    lines.push(`   Currently at: ${location.name}`);
+  } else {
+    lines.push('   Location: Unknown');
+  }
+
+  lines.push(`   Party: ${memberCount} member${memberCount !== 1 ? 's' : ''}`);
+  lines.push(`   Notes: ${noteCount} recorded`);
+
+  return lines;
+}
+
+/**
+ * Get comprehensive session context
+ */
+export async function getSessionContext(input: unknown): Promise<{ content: { type: 'text'; text: string }[] }> {
+  try {
+    const parsed = getSessionContextSchema.parse(input);
+    const format = parsed.format || 'detailed';
+    const sections = parsed.include || ['location', 'party', 'notes', 'combat', 'summary'];
+    const maxNotes = parsed.maxNotes;
+    const includeTimestamps = parsed.includeTimestamps || false;
+
+    const lines: string[] = [];
+
+    // Build context based on requested sections
+    for (const section of sections) {
+      switch (section) {
+        case 'location':
+          lines.push(...getLocationContext(format));
+          break;
+        case 'party':
+          lines.push(...getPartyContext(format));
+          break;
+        case 'notes':
+          lines.push(...getNotesContext(format, maxNotes, includeTimestamps));
+          break;
+        case 'combat':
+          lines.push(...getCombatContext(format));
+          break;
+        case 'summary':
+          lines.push(...getSummaryContext());
+          break;
+      }
+      if (format !== 'brief') {
+        lines.push(''); // spacing between sections
+      }
+    }
+
+    // Remove trailing empty lines
+    while (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+
+    const output = createBox('SESSION CONTEXT', lines, DISPLAY_WIDTH);
+    return { content: [{ type: 'text' as const, text: output }] };
+  } catch (error) {
+    const lines: string[] = [];
+
+    if (error instanceof z.ZodError) {
+      for (const issue of error.issues) {
+        lines.push(`${issue.path.join('.')}: ${issue.message}`);
+      }
+    } else if (error instanceof Error) {
+      lines.push(error.message);
+    } else {
+      lines.push('An unknown error occurred');
+    }
+
+    return { content: [{ type: 'text' as const, text: createBox('ERROR', lines, DISPLAY_WIDTH) }] };
+  }
+}
+
