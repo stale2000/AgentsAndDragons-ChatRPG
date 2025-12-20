@@ -356,8 +356,11 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
 
-        if (typeof content === 'string') {
-            // Parse markdown-like formatting
+        if (role === 'system') {
+            // System/Tool messages are pre-formatted HTML
+            contentDiv.innerHTML = content;
+        } else if (typeof content === 'string') {
+            // Parse markdown-like formatting for standard messages
             contentDiv.innerHTML = this.formatMessage(content);
         } else {
             contentDiv.textContent = JSON.stringify(content, null, 2);
