@@ -27,6 +27,34 @@ const getDataDir = () => {
 const DATA_ROOT = getDataDir();
 
 // ============================================================
+// REAL-TIME HP PERSISTENCE
+// ============================================================
+
+/**
+ * Sync HP changes to persistent character file in real-time.
+ * Called whenever HP changes during combat (damage, healing, etc.)
+ * Only syncs for persistent participants (those with characterId).
+ */
+function syncHpToCharacter(participant: { id: string; hp: number; characterId?: string }): void {
+  const charId = (participant as any).characterId;
+  if (!charId) return; // Ephemeral participant, no persistence needed
+
+  const charPath = path.join(DATA_ROOT, 'characters', `${charId}.json`);
+  if (!fs.existsSync(charPath)) return; // Character file doesn't exist
+
+  try {
+    const charData = JSON.parse(fs.readFileSync(charPath, 'utf-8'));
+    if (charData.hp !== participant.hp) {
+      charData.hp = participant.hp;
+      fs.writeFileSync(charPath, JSON.stringify(charData, null, 2), 'utf-8');
+    }
+  } catch (err) {
+    // Silently fail - don't interrupt combat for persistence errors
+    console.warn(`Failed to sync HP for character ${charId}:`, err);
+  }
+}
+
+// ============================================================
 // SCHEMAS
 // ============================================================
 
@@ -1225,7 +1253,18 @@ export function createEncounter(input: CreateEncounterInput): string {
 
   for (const rawParticipant of parsed.participants) {
     // Detect mode: check if this looks like a character reference
-    const isReference = 'characterId' in rawParticipant || 'characterName' in rawParticipant;
+    // AND verify the characterId actually exists (if provided)
+    let isReference = 'characterId' in rawParticipant || 'characterName' in rawParticipant;
+
+    // If characterId is provided, verify it exists - otherwise treat as ephemeral
+    if (isReference && 'characterId' in rawParticipant && rawParticipant.characterId) {
+      const charPath = path.join(DATA_ROOT, 'characters', `${rawParticipant.characterId}.json`);
+      if (!fs.existsSync(charPath)) {
+        // Character doesn't exist - treat as ephemeral by clearing the reference
+        isReference = false;
+        delete (rawParticipant as any).characterId;
+      }
+    }
 
     let participant: z.infer<typeof ManualParticipantSchema>;
     let wasSurprised = false;
@@ -2202,6 +2241,8 @@ function handleAttackAction(
   let oldHp = target.hp;
   if (isHit && damage > 0) {
     target.hp = Math.max(0, target.hp - damage);
+    // Sync HP to persistent character file in real-time
+    syncHpToCharacter(target);
   }
 
   // Track combat statistics on attacker (ADR-005: State Sync)
@@ -2398,6 +2439,8 @@ function checkOpportunityAttacks(
       if (hit) {
         damage = Math.floor(Math.random() * 6) + 1 + 2; // 1d6+2 default
         mover.hp = Math.max(0, mover.hp - damage);
+        // Sync HP to persistent character file in real-time
+        syncHpToCharacter(mover);
         result = `Roll: ${attackRoll} vs AC ${mover.ac} - HIT! ${damage} damage`;
       } else {
         result = `Roll: ${attackRoll} vs AC ${mover.ac} - MISS`;
@@ -3380,6 +3423,8 @@ function applyDeathSaveOutcome(
     case 'nat20':
       // Revive at 1 HP, clear death save state
       character.hp = 1;
+      // Sync HP to persistent character file in real-time
+      syncHpToCharacter(character);
       state.successes = 0;
       state.failures = 0;
       state.isStable = false;

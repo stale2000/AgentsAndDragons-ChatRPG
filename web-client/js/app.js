@@ -84,30 +84,30 @@ class ChatApp {
         this.updateInputState();
         this.updateStatus('connecting', 'Thinking...');
 
-        // Show loading indicator
-        const loadingId = this.addLoadingMessage();
-
         try {
-            // Call OpenAI API with ChatRPG as remote MCP server
+            // Call OpenAI API with ChatRPG as remote MCP server (streaming)
             const response = await this.callOpenAI(message);
 
-            // Remove loading indicator
-            this.removeMessage(loadingId);
-
-            // Add assistant response
-            // Add assistant response
+            // Handle response - text may have been streamed to UI already
             if (response) {
                 if (Array.isArray(response)) {
                     // Handle list of response items (tools + text)
                     response.forEach(item => {
-                        this.addMessage(item.role || 'assistant', item.content);
-                        
-                        // Only add text responses to history context to avoid confusing the LLM
-                        if (item.type === 'text') {
+                        // Skip text items if streaming already rendered them
+                        if (item._alreadyRendered) {
+                            // Just add to history, don't re-render
                             this.conversationHistory.push({
                                 role: 'assistant',
                                 content: item.content
                             });
+                        } else {
+                            this.addMessage(item.role || 'assistant', item.content);
+                            if (item.type === 'text') {
+                                this.conversationHistory.push({
+                                    role: 'assistant',
+                                    content: item.content
+                                });
+                            }
                         }
                     });
                 } else {
@@ -124,7 +124,6 @@ class ChatApp {
 
         } catch (error) {
             console.error('Error calling OpenAI:', error);
-            this.removeMessage(loadingId);
             this.showError(`Failed to get response: ${error.message}`);
             this.updateStatus('error', 'Error');
         } finally {
@@ -135,28 +134,59 @@ class ChatApp {
 
     async callOpenAI(userMessage) {
         // System prompt - placed first to maximize cache hits
-        const systemPrompt = `You are a helpful D&D 5e assistant powered by the ChatRPG MCP server.
+        const systemPrompt = `You are an engaging Dungeon Master running a D&D 5e campaign, powered by the ChatRPG MCP server.
 
-Your capabilities include:
-- Character creation and management
-- Combat encounter tracking
-- Inventory management
-- Spell management
-- Campaign organization
-- Dice rolling and D&D 5e rules assistance
+## Your Role
+You ARE the Dungeon Master. The user is a PLAYER in your game. Treat every interaction as part of an ongoing adventure:
+- Narrate the world vividly - describe scenes, NPCs, and events with atmosphere
+- React to player actions with consequences and story progression
+- Use dramatic tension, humor, and character voices to bring the world alive
+- Always stay in character as the DM unless the player explicitly asks for out-of-game help
 
-Always use the ChatRPG tools when users ask about D&D mechanics, character creation, combat, or campaign management.`;
+## Gameplay Flow
+When players take actions:
+1. Acknowledge what they're attempting with brief narrative flair
+2. Use ChatRPG tools to resolve mechanics (rolls, damage, conditions, etc.)
+3. Narrate the OUTCOME cinematically - don't just report numbers
+4. Advance the story or prompt the next decision
+
+Example:
+- Player: "I swing my axe at the goblin!"
+- You: *Describe the tense moment* -> Use execute_action tool -> *Narrate the hit/miss dramatically with the result*
+
+## Tool Usage Guidelines
+- Use tools BETWEEN narrative beats, not as a replacement for storytelling
+- After tool results, always follow up with narrative description
+- Combine multiple tool calls when needed (e.g., attack + damage + condition check)
+- Keep the game flowing - don't over-explain mechanics unless asked
+
+## Combat Narration
+- Describe attacks with visceral detail ("Your blade catches firelight as it arcs down...")
+- Make hits feel impactful and misses feel tense, not disappointing
+- Track the battlefield verbally ("The remaining two goblins scramble behind the overturned table...")
+- Build tension as HP drops ("The ogre staggers, blood streaming from a dozen wounds...")
+
+## Between Combat
+- Create memorable NPCs with distinct voices and motivations
+- Describe environments with sensory details (sounds, smells, lighting)
+- Offer meaningful choices with real consequences
+- Reward creative problem-solving
+
+## Remember
+You're not an assistant - you're a DUNGEON MASTER. Be theatrical. Be fair. Be fun.
+When in doubt: What would make this moment more exciting for the player?`;
 
         // Build conversation context (recent history for continuity)
+        // Note: Current user message is already in history, so we include it in the context
         const conversationContext = this.conversationHistory
-            .slice(-5) // Keep last 5 exchanges for context
-            .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+            .slice(-6) // Keep last 6 messages (3 exchanges) for context
+            .map(msg => `${msg.role === 'user' ? 'Player' : 'DM'}: ${msg.content}`)
             .join('\n');
 
-        // Structure: Static system prompt first, then conversation history, then current message
+        // Structure: Static system prompt first, then conversation context (which includes current message)
         const fullInput = conversationContext
-            ? `${systemPrompt}\n\n${conversationContext}\nUser: ${userMessage}`
-            : `${systemPrompt}\n\nUser: ${userMessage}`;
+            ? `${systemPrompt}\n\n--- Recent Conversation ---\n${conversationContext}`
+            : `${systemPrompt}\n\nPlayer: ${userMessage}`;
 
         const response = await fetch('https://api.openai.com/v1/responses', {
             method: 'POST',
@@ -167,6 +197,7 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
             body: JSON.stringify({
                 model: 'gpt-5-nano-2025-08-07',
                 input: fullInput,
+                stream: true, // Enable streaming for real-time token display
                 // Note: In-memory caching is automatic; extended caching (24h) not supported on gpt-5-nano
                 tools: [
                     {
@@ -185,7 +216,8 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
             throw new Error(error.error?.message || 'OpenAI API request failed');
         }
 
-        const data = await response.json();
+        // Handle streaming response (SSE)
+        const data = await this.handleStreamingResponse(response);
 
         // DEBUG: Log full response to understand structure
         console.log('🔍 Full API Response:', data);
@@ -216,6 +248,12 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
 
         // Extract content (Tool Calls & Text)
         const responseItems = [];
+
+        // Carry streaming flags through to response
+        if (data._streamingHandled) {
+            responseItems._streamingHandled = true;
+            responseItems._streamingTextContent = data._streamingTextContent;
+        }
 
         if (Array.isArray(data.output)) {
             // 1. Extract Tool Calls
@@ -331,17 +369,26 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
                 }
             }
 
-            if (responseText) {
+            // Only add text if not already handled by streaming
+            if (responseText && !data._streamingHandled) {
                 responseItems.push({
                     type: 'text',
                     role: 'assistant',
                     content: responseText
                 });
+            } else if (responseText && data._streamingHandled) {
+                // Text was streamed - just mark it for history tracking
+                responseItems.push({
+                    type: 'text',
+                    role: 'assistant',
+                    content: responseText,
+                    _alreadyRendered: true
+                });
             }
-        } 
-        
-        // Legacy/Fallback parsing (if no structured output extracted)
-        if (responseItems.length === 0) {
+        }
+
+        // Legacy/Fallback parsing (if no structured output extracted and not streaming)
+        if (responseItems.length === 0 && !data._streamingHandled) {
             let responseText = null;
              if (typeof data.output === 'string') {
                 responseText = data.output;
@@ -350,21 +397,171 @@ Always use the ChatRPG tools when users ask about D&D mechanics, character creat
                                data.choices?.[0]?.message?.content ||
                                data.choices?.[0]?.text;
             }
-            
+
             if (responseText) {
                  responseItems.push({ type: 'text', role: 'assistant', content: responseText });
             } else {
                 console.warn('⚠️ Could not extract response text from:', JSON.stringify(data.output || data, null, 2));
-                responseItems.push({ 
-                    type: 'text', 
-                    role: 'assistant', 
-                    content: 'No text response generated. (Check console for details)' 
+                responseItems.push({
+                    type: 'text',
+                    role: 'assistant',
+                    content: 'No text response generated. (Check console for details)'
                 });
             }
         }
 
         console.log('📝 Extracted items:', responseItems.length);
         return responseItems;
+    }
+
+    /**
+     * Handle streaming SSE response from OpenAI
+     * Parses server-sent events and accumulates the response
+     */
+    async handleStreamingResponse(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        // Accumulated data structure matching non-streaming format
+        const data = {
+            output: [],
+            usage: null
+        };
+
+        // Track current streaming state
+        let currentTextContent = '';
+        let currentMcpCalls = new Map(); // Track MCP calls by ID
+        let buffer = ''; // Buffer for incomplete SSE lines
+
+        // Create streaming message element for real-time text display
+        let streamingMessageDiv = null;
+        let streamingContentDiv = null;
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+
+                // Keep incomplete last line in buffer
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+
+                    const eventData = line.slice(6); // Remove 'data: ' prefix
+                    if (eventData === '[DONE]') continue;
+
+                    try {
+                        const event = JSON.parse(eventData);
+
+                        // Handle different event types
+                        if (event.type === 'response.output_text.delta') {
+                            // Streaming text delta
+                            const delta = event.delta || '';
+                            currentTextContent += delta;
+
+                            // Create or update streaming message
+                            if (!streamingMessageDiv) {
+                                streamingMessageDiv = document.createElement('div');
+                                streamingMessageDiv.className = 'message assistant streaming';
+                                streamingMessageDiv.dataset.timestamp = Date.now();
+
+                                streamingContentDiv = document.createElement('div');
+                                streamingContentDiv.className = 'message-content';
+                                streamingMessageDiv.appendChild(streamingContentDiv);
+                                this.messagesContainer.appendChild(streamingMessageDiv);
+                            }
+
+                            // Update content with cursor
+                            streamingContentDiv.innerHTML = this.formatMessage(currentTextContent) + '<span class="streaming-cursor">▌</span>';
+                            this.scrollToBottom();
+
+                        } else if (event.type === 'response.mcp_call.started') {
+                            // MCP tool call started
+                            const callId = event.item_id || event.call_id;
+                            currentMcpCalls.set(callId, {
+                                type: 'mcp_call',
+                                name: event.name || 'unknown_tool',
+                                arguments: event.arguments || '',
+                                status: 'in_progress',
+                                output: null,
+                                error: null
+                            });
+                            this.updateStatus('connecting', `Calling ${event.name}...`);
+
+                        } else if (event.type === 'response.mcp_call.completed') {
+                            // MCP tool call completed
+                            const callId = event.item_id || event.call_id;
+                            const mcpCall = currentMcpCalls.get(callId);
+                            if (mcpCall) {
+                                mcpCall.status = 'completed';
+                                mcpCall.output = event.output;
+                            }
+                            this.updateStatus('connecting', 'Thinking...');
+
+                        } else if (event.type === 'response.mcp_call.failed') {
+                            // MCP tool call failed
+                            const callId = event.item_id || event.call_id;
+                            const mcpCall = currentMcpCalls.get(callId);
+                            if (mcpCall) {
+                                mcpCall.status = 'failed';
+                                mcpCall.error = event.error;
+                            }
+
+                        } else if (event.type === 'response.output_text.done') {
+                            // Text output complete - finalize streaming message
+                            if (streamingMessageDiv) {
+                                streamingMessageDiv.classList.remove('streaming');
+                                streamingContentDiv.innerHTML = this.formatMessage(currentTextContent);
+                            }
+
+                        } else if (event.type === 'response.done') {
+                            // Full response complete - extract usage stats
+                            if (event.response?.usage) {
+                                data.usage = event.response.usage;
+                            }
+                        }
+
+                    } catch (parseError) {
+                        console.warn('Failed to parse SSE event:', eventData, parseError);
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
+
+        // Finalize streaming message if still in progress
+        if (streamingMessageDiv) {
+            streamingMessageDiv.classList.remove('streaming');
+            if (streamingContentDiv) {
+                streamingContentDiv.innerHTML = this.formatMessage(currentTextContent);
+            }
+        }
+
+        // Build final output array matching non-streaming format
+        // Add MCP calls first
+        for (const mcpCall of currentMcpCalls.values()) {
+            data.output.push(mcpCall);
+        }
+
+        // Add text message if present
+        if (currentTextContent) {
+            data.output.push({
+                type: 'message',
+                role: 'assistant',
+                content: currentTextContent
+            });
+        }
+
+        // Mark that streaming was handled (so we don't re-render text)
+        data._streamingHandled = true;
+        data._streamingTextContent = currentTextContent;
+
+        return data;
     }
 
     updateInputState() {
