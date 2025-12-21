@@ -33,6 +33,12 @@ export interface ToolDefinition {
 
 // Helper: Format success response
 export function success(markdown: string): CallToolResult {
+  // Log raw output for debugging encoding issues
+  console.error('[MCP RAW OUTPUT]', markdown.substring(0, 500));
+  // Also log hex of first 100 chars to see actual bytes
+  const hexPreview = [...markdown.substring(0, 100)].map(c => c.charCodeAt(0).toString(16).padStart(4, '0')).join(' ');
+  console.error('[MCP RAW HEX]', hexPreview);
+
   return {
     content: [{ type: 'text', text: markdown }],
   };

@@ -14,6 +14,8 @@ class ChatApp {
         this.sendButton = document.getElementById('send-button');
         this.statusIndicator = document.querySelector('.status-indicator');
         this.statusText = document.querySelector('.status-text');
+        this.typingIndicator = document.getElementById('typing-indicator');
+        this.typingText = this.typingIndicator?.querySelector('.typing-text');
 
         this.init();
     }
@@ -255,8 +257,11 @@ You are the DM. Don't explain - PLAY.`;
             const mcpCalls = data.output.filter(item => item.type === 'mcp_call');
             console.log('🔧 MCP calls found in output:', mcpCalls.length, mcpCalls);
 
-            // 1. Extract Tool Calls
-            data.output.filter(item => item.type === 'mcp_call').forEach(item => {
+            // 1. Extract Tool Calls - collect for async processing
+            const mcpCallItems = data.output.filter(item => item.type === 'mcp_call');
+
+            // Process each MCP call - re-fetch from server for clean UTF-8
+            for (const item of mcpCallItems) {
                 // OpenAI MCP uses: name (tool name), arguments (JSON string), output (result string)
                 const toolName = item.name || item.tool_name || item.tool_call?.function?.name || 'unknown_tool';
                 const status = item.status || 'unknown';
@@ -269,16 +274,19 @@ You are the DM. Don't explain - PLAY.`;
 
                 // 1. Inputs (Arguments) - OpenAI sends as JSON string in "arguments"
                 const rawArgs = item.arguments || item.args || item.input;
+                let parsedArgs = null;
 
                 if (rawArgs) {
                     let argsFormatted;
                     if (typeof rawArgs === 'string') {
                         try {
-                            argsFormatted = JSON.stringify(JSON.parse(rawArgs), null, 2);
+                            parsedArgs = JSON.parse(rawArgs);
+                            argsFormatted = JSON.stringify(parsedArgs, null, 2);
                         } catch {
                             argsFormatted = rawArgs;
                         }
                     } else {
+                        parsedArgs = rawArgs;
                         argsFormatted = JSON.stringify(rawArgs, null, 2);
                     }
                     content += `
@@ -298,43 +306,57 @@ You are the DM. Don't explain - PLAY.`;
 </details>`;
                 }
 
-                // 3. Output - OpenAI MCP uses "output" property (string or object)
-                // Display output prominently (not collapsed) - this is the main content!
-                const rawOutput = item.output || item.result;
+                // 3. Output - Re-fetch directly from MCP server for clean UTF-8!
+                // This bypasses OpenAI's encoding corruption
+                let outputText = '';
 
-                if (rawOutput) {
-                    let outputText = '';
-
-                    if (typeof rawOutput === 'string') {
-                        // Check if it's JSON - if so, pretty-print; otherwise show as-is (ASCII art, etc.)
-                        try {
-                            const parsed = JSON.parse(rawOutput);
-                            outputText = JSON.stringify(parsed, null, 2);
-                        } catch {
-                            // Not JSON - likely ASCII art or plain text, show as-is
-                            outputText = rawOutput;
+                if (status === 'completed' && parsedArgs) {
+                    try {
+                        // Call our MCP server directly to get clean output
+                        const directResult = await this.callToolDirect(toolName, parsedArgs);
+                        if (directResult) {
+                            outputText = directResult;
+                            console.log('🎯 Got clean output from direct call');
                         }
-                    } else if (rawOutput.content && Array.isArray(rawOutput.content)) {
-                        // MCP content array format
-                        outputText = rawOutput.content
-                            .filter(c => c.type === 'text')
-                            .map(c => c.text)
-                            .join('\n');
-                    } else {
-                        outputText = JSON.stringify(rawOutput, null, 2);
+                    } catch (e) {
+                        console.warn('Direct tool call failed, falling back to OpenAI output:', e);
                     }
+                }
 
+                // Fallback to OpenAI's output if direct call failed
+                if (!outputText) {
+                    const rawOutput = item.output || item.result;
+                    if (rawOutput) {
+                        if (typeof rawOutput === 'string') {
+                            try {
+                                const parsed = JSON.parse(rawOutput);
+                                outputText = JSON.stringify(parsed, null, 2);
+                            } catch {
+                                outputText = rawOutput;
+                            }
+                        } else if (rawOutput.content && Array.isArray(rawOutput.content)) {
+                            outputText = rawOutput.content
+                                .filter(c => c.type === 'text')
+                                .map(c => c.text)
+                                .join('\n');
+                        } else {
+                            outputText = JSON.stringify(rawOutput, null, 2);
+                        }
+                    }
+                }
+
+                if (outputText) {
                     // Output shown prominently - no collapsible wrapper
                     content += `
 <pre class="tool-output-display"><code>${outputText}</code></pre>`;
                 }
-                
+
                 responseItems.push({
                     type: 'tool',
                     role: 'system', // Use system role for lighter styling
                     content: content
                 });
-            });
+            }
 
             // 2. Extract Message Text
             let responseText = null;
@@ -491,6 +513,7 @@ You are the DM. Don't explain - PLAY.`;
                                 error: item.error
                             });
                             this.updateStatus('connecting', `Calling ${item.name}...`);
+                            this.updateTypingIndicator(`Calling ${item.name}...`);
 
                         } else if (event.type === 'response.mcp_call.in_progress') {
                             // MCP tool call in progress
@@ -528,6 +551,7 @@ You are the DM. Don't explain - PLAY.`;
                                 error: item.error || mcpCall.error
                             });
                             this.updateStatus('connecting', 'Thinking...');
+                            this.updateTypingIndicator('Processing response...');
 
                         } else if (event.type === 'response.mcp_call.completed') {
                             // MCP tool call completed (legacy event)
@@ -538,6 +562,7 @@ You are the DM. Don't explain - PLAY.`;
                                 mcpCall.output = event.output || mcpCall.output;
                             }
                             this.updateStatus('connecting', 'Thinking...');
+                            this.updateTypingIndicator('Processing response...');
 
                         } else if (event.type === 'response.mcp_call.failed') {
                             // MCP tool call failed
@@ -604,6 +629,102 @@ You are the DM. Don't explain - PLAY.`;
     updateInputState() {
         this.sendButton.disabled = this.isProcessing;
         this.userInput.disabled = this.isProcessing;
+
+        // Show/hide typing indicator based on processing state
+        if (this.isProcessing) {
+            this.showTypingIndicator('Generating response...');
+        } else {
+            this.hideTypingIndicator();
+        }
+    }
+
+    /**
+     * Show the typing indicator with a custom message
+     * @param {string} message - The message to display
+     */
+    showTypingIndicator(message = 'Generating response...') {
+        if (this.typingIndicator) {
+            this.typingIndicator.classList.add('visible');
+            if (this.typingText) {
+                this.typingText.textContent = message;
+            }
+        }
+    }
+
+    /**
+     * Hide the typing indicator
+     */
+    hideTypingIndicator() {
+        if (this.typingIndicator) {
+            this.typingIndicator.classList.remove('visible');
+        }
+    }
+
+    /**
+     * Update the typing indicator message without hiding it
+     * @param {string} message - The new message to display
+     */
+    updateTypingIndicator(message) {
+        if (this.typingText && this.typingIndicator?.classList.contains('visible')) {
+            this.typingText.textContent = message;
+        }
+    }
+
+    /**
+     * Call MCP tool directly to get clean UTF-8 output.
+     * This bypasses OpenAI's encoding corruption by calling our server directly.
+     *
+     * @param {string} toolName - Name of the tool to call
+     * @param {object} args - Tool arguments
+     * @returns {Promise<string|null>} - Tool output text or null on failure
+     */
+    async callToolDirect(toolName, args) {
+        try {
+            // Get MCP server URL from config, convert to base URL
+            const mcpUrl = window.CHATRPG_CONFIG.mcpServerUrl;
+            // Extract base URL (remove /sse if present)
+            const baseUrl = mcpUrl.replace(/\/sse$/, '');
+            const toolUrl = `${baseUrl}/tool`;
+
+            console.log(`🎯 Direct tool call to ${toolUrl}:`, toolName, args);
+            this.updateTypingIndicator(`Fetching ${toolName} output...`);
+
+            const response = await fetch(toolUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json; charset=utf-8'
+                },
+                body: JSON.stringify({
+                    name: toolName,
+                    arguments: args
+                })
+            });
+
+            if (!response.ok) {
+                console.error(`❌ Direct tool call failed: ${response.status} ${response.statusText}`);
+                return null;
+            }
+
+            const result = await response.json();
+            console.log('✅ Direct tool call succeeded, result:', result);
+
+            // Extract text from MCP content format
+            if (result.content && Array.isArray(result.content)) {
+                const textParts = result.content
+                    .filter(c => c.type === 'text')
+                    .map(c => c.text);
+                const output = textParts.join('\n');
+                // Log first 200 chars to verify encoding
+                console.log('📄 Direct output preview:', output.substring(0, 200));
+                return output;
+            }
+
+            console.warn('⚠️ No content array in result:', result);
+            return null;
+        } catch (e) {
+            console.error('❌ Direct tool call error:', e);
+            return null;
+        }
     }
 
     addMessage(role, content) {

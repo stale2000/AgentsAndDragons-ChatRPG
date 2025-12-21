@@ -139,6 +139,40 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  // Direct tool call endpoint - bypasses OpenAI for clean UTF-8 output
+  if (url.pathname === '/tool') {
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', async () => {
+        try {
+          const { name, arguments: args } = JSON.parse(body);
+          console.error(`[HTTP] Direct tool call: ${name}`);
+
+          const result = await handleToolCall(name, args);
+
+          // Return raw result with proper UTF-8 encoding
+          res.writeHead(200, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-cache'
+          });
+          res.end(JSON.stringify(result));
+        } catch (error) {
+          console.error('[HTTP] Tool call error:', error);
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({
+            error: error instanceof Error ? error.message : 'Unknown error'
+          }));
+        }
+      });
+      return;
+    }
+
+    res.writeHead(405);
+    res.end('Method Not Allowed');
+    return;
+  }
+
   // 404 for unknown paths
   res.writeHead(404);
   res.end('Not Found');
