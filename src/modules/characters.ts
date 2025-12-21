@@ -19,7 +19,9 @@ import {
   DamageTypeSchema,
   ConditionSchema,
   SkillSchema,
-  SizeSchema
+  SizeSchema,
+  Skill,
+  Ability
 } from '../types.js';
 import { fuzzyEnum } from '../fuzzy-enum.js';
 import * as fs from 'fs';
@@ -1704,8 +1706,8 @@ function updateCharacterBatch(updates: Array<z.infer<typeof singleUpdateSchema>>
       continue;
     }
 
-    // Perform single update
-    const singleResult = updateCharacter(update as any);
+    // Perform single update - pass as UpdateCharacterInput (single variant of the union)
+    const singleResult = updateCharacter(update);
 
     if (!singleResult.success) {
       results.push({
@@ -1879,7 +1881,8 @@ function getCharacterBatch(requests: Array<z.infer<typeof singleGetSchema>>): {
 
   // Fetch each character
   for (const request of requests) {
-    const result = getCharacter(request as any);
+    // Single get request satisfies the union type
+    const result = getCharacter(request as GetCharacterInput);
 
     if (result.success && result.character) {
       characters.push(result.character);
