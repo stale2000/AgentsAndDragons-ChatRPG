@@ -490,13 +490,13 @@ function formatBatchResults(results: Array<{
     // Special formatting for query batch - show full details
     content.push(centerText(`CONDITION STATUS - ${results.length} CHARACTERS`, 68));
     content.push('');
-    content.push('Ã¢â€¢Â'.repeat(68));
+    content.push('•'.repeat(68));
 
     for (const result of results) {
       content.push('');
       const displayName = result.targetName || result.targetId;
       content.push(centerText(displayName.toUpperCase(), 68));
-      content.push('Ã¢â€â‚¬'.repeat(68));
+      content.push('─'.repeat(68));
 
       if (result.success && result.queryResult) {
         // Extract just the condition details from the query result
@@ -504,7 +504,7 @@ function formatBatchResults(results: Array<{
         const lines = result.queryResult.split('\n');
         // Find lines that contain actual condition info (skip the box borders)
         const relevantLines = lines.filter(line => {
-          return line.trim() && !line.match(/^[Ã¢â€¢â€Ã¢â€¢â€”Ã¢â€¢Å¡Ã¢â€¢ÂÃ¢â€¢â€˜Ã¢â€¢ÂÃ¢â€â‚¬Ã¢â€Å’Ã¢â€ÂÃ¢â€â€Ã¢â€ËœÃ¢â€â€š]+$/) && !line.includes('CONDITION STATUS');
+          return line.trim() && !line.match(/^[╔═•Š•░•──Š╝║│└]+$/) && !line.includes('CONDITION STATUS');
         });
 
         for (const line of relevantLines) {
@@ -518,21 +518,21 @@ function formatBatchResults(results: Array<{
       content.push('');
     }
 
-    content.push('Ã¢â€¢Â'.repeat(68));
+    content.push('•'.repeat(68));
     return createBox('BATCH CONDITION QUERY', content, undefined, 'HEAVY');
   }
 
   // Standard batch operation formatting (add/remove/tick)
   content.push(centerText(`PROCESSED ${results.length} OPERATIONS`, 68));
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(68));
+  content.push('─'.repeat(68));
   content.push('');
 
   const successCount = results.filter(r => r.success).length;
   const failCount = results.length - successCount;
 
   for (const result of results) {
-    const status = result.success ? 'Ã¢Å“â€œ' : 'Ã¢Å“â€”';
+    const status = result.success ? '✓' : '✗';
     const displayName = result.targetName || result.targetId;
     const opDesc = result.condition
       ? `${result.operation} ${result.condition}`
@@ -545,7 +545,7 @@ function formatBatchResults(results: Array<{
   }
 
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(68));
+  content.push('─'.repeat(68));
   content.push('');
   content.push(padText(`Success: ${successCount} | Failed: ${failCount}`, 68, 'left'));
 
@@ -1380,19 +1380,19 @@ function formatEncounterCreated(
   content.push(centerText(`Round: ${encounter.round} | Lighting: ${encounter.lighting}`, WIDTH));
   content.push(centerText(`${encounter.participants.length} Participants`, WIDTH));
   content.push('');
-  content.push('Ã¢â€¢Â'.repeat(WIDTH));
+  content.push('•'.repeat(WIDTH));
   content.push('');
 
   // Initiative Order
   content.push(centerText('INITIATIVE ORDER', WIDTH));
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(WIDTH));
+  content.push('─'.repeat(WIDTH));
   content.push('');
 
   // Table header - widened position column to 14 chars to fit "(100, 100) 50ft"
   const header = ' #  | Name                | Init | HP          | AC | Position      ';
   content.push(header);
-  content.push('Ã¢â€â‚¬'.repeat(WIDTH));
+  content.push('─'.repeat(WIDTH));
 
   // Participants
   for (let i = 0; i < encounter.participants.length; i++) {
@@ -1463,7 +1463,7 @@ function formatEncounterCreated(
   }
 
   // Initiative summary for each participant (helps with test regex matching)
-  content.push('Ã¢â€â‚¬'.repeat(WIDTH));
+  content.push('─'.repeat(WIDTH));
   content.push('');
   for (const p of encounter.participants) {
     const surprised = p.surprised ? ' (SURPRISED)' : '';
@@ -1473,7 +1473,7 @@ function formatEncounterCreated(
   }
   
   content.push('');
-  content.push('Ã¢â€¢Â'.repeat(WIDTH));
+  content.push('•'.repeat(WIDTH));
   content.push('');
 
   // Terrain info
@@ -1532,9 +1532,9 @@ const HP_BAR_WIDTH = {
 
 /** Lighting display with icons */
 const LIGHTING_DISPLAY: Record<string, string> = {
-  bright: 'Ã¢Ëœâ‚¬Ã¯Â¸Â Bright Light',
+  bright: '☀️ Bright Light',
   dim: 'Ã°Å¸Å’â„¢ Dim Light',
-  darkness: 'Ã¢Å¡Â« Darkness',
+  darkness: '⚫ Darkness',
 };
 
 /** Type for participant with initiative (encounter context) */
@@ -1548,13 +1548,13 @@ type EncounterParticipant = Participant & { initiative: number };
  * Get status indicator emoji based on HP percentage.
  * @param hp - Current HP
  * @param maxHp - Maximum HP
- * @returns Status emoji: Ã°Å¸â€™â‚¬ (dead), Ã¢Å¡Â  (bloodied), Ã¢Å“â€œ (full), or empty
+ * @returns Status emoji: Ã°Å¸â€™â‚¬ (dead), ⚠ (bloodied), ✓ (full), or empty
  */
 function getStatusIndicator(hp: number, maxHp: number): string {
   if (hp === 0) return ' Ã°Å¸â€™â‚¬';
   const percent = Math.round((hp / maxHp) * 100);
-  if (percent <= 25) return ' Ã¢Å¡Â ';
-  if (percent >= 100) return ' Ã¢Å“â€œ';
+  if (percent <= 25) return ' ⚠';
+  if (percent >= 100) return ' ✓';
   return '';
 }
 
@@ -1563,12 +1563,12 @@ function getStatusIndicator(hp: number, maxHp: number): string {
  * @param current - Current HP
  * @param max - Maximum HP  
  * @param width - Bar width in characters
- * @returns HP bar string like "Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜"
+ * @returns HP bar string like "████░░░░"
  */
 function createMiniHpBar(current: number, max: number, width: number): string {
   const percent = Math.max(0, Math.min(1, current / max));
   const filled = Math.round(percent * width);
-  return 'Ã¢â€“Ë†'.repeat(filled) + 'Ã¢â€“â€˜'.repeat(width - filled);
+  return '█'.repeat(filled) + '░'.repeat(width - filled);
 }
 
 /**
@@ -1583,8 +1583,8 @@ function formatDeathSaveDisplay(encounterId: string, characterId: string): strin
     return 'Ã°Å¸â€™â‚¬ DYING - needs death save!';
   }
   
-  const successMarkers = 'Ã¢â€”Â'.repeat(deathState.successes) + 'Ã¢â€”â€¹'.repeat(3 - deathState.successes);
-  const failMarkers = 'Ã¢Å“â€¢'.repeat(deathState.failures) + 'Ã¢â€”â€¹'.repeat(3 - deathState.failures);
+  const successMarkers = '●'.repeat(deathState.successes) + '○'.repeat(3 - deathState.successes);
+  const failMarkers = '✕'.repeat(deathState.failures) + '○'.repeat(3 - deathState.failures);
   
   let status = '';
   if (deathState.isStable) status = ' (STABLE)';
@@ -1673,7 +1673,7 @@ function formatEndedEncounter(encounter: EncounterState): string {
   content.push('FINAL STATE:');
   
   for (const p of encounter.participants) {
-    const marker = p.hp > 0 ? 'Ã¢Å“â€œ' : 'Ã¢Å“â€”';
+    const marker = p.hp > 0 ? '✓' : '✗';
     const status = p.hp > 0 ? 'ALIVE' : 'DEAD';
     if (p.hp > 0) {
       content.push(`  ${marker} ${p.name} - ${status} (${p.hp}/${p.maxHp} HP)`);
@@ -1728,13 +1728,13 @@ function formatEncounterSummary(
   
   // Header info
   content.push(padText(`Encounter: ${encounter.id}`, ENCOUNTER_WIDTH, 'left'));
-  content.push(padText(`Round ${encounter.round} Ã¢â‚¬Â¢ ${current.name}'s Turn`, ENCOUNTER_WIDTH, 'left'));
+  content.push(padText(`Round ${encounter.round} • ${current.name}'s Turn`, ENCOUNTER_WIDTH, 'left'));
   content.push('');
   
   // Participant summary with HP bars
-  content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
+  content.push('─'.repeat(ENCOUNTER_WIDTH));
   content.push(centerText(`COMBATANTS (${encounter.participants.length})`, ENCOUNTER_WIDTH));
-  content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
+  content.push('─'.repeat(ENCOUNTER_WIDTH));
   
   for (const p of encounter.participants) {
     const maxHp = p.maxHp || p.hp;
@@ -1742,7 +1742,7 @@ function formatEncounterSummary(
     const hpBar = createMiniHpBar(p.hp, maxHp, HP_BAR_WIDTH.SUMMARY);
     
     // Mark current turn with arrow
-    const turnMarker = p.id === current.id ? 'Ã¢â€“Â¶ ' : '  ';
+    const turnMarker = p.id === current.id ? '▶ ' : '  ';
     const status = getStatusIndicator(p.hp, maxHp);
     
     const line = `${turnMarker}${p.name}: [${hpBar}] ${hpPercent}%${status}`;
@@ -1764,22 +1764,22 @@ function formatEncounterStandard(
   
   // Header with key info - no padding, let box auto-size
   content.push(`Encounter: ${encounter.id}`);
-  content.push(`Round ${encounter.round} Ã¢â‚¬Â¢ Turn ${encounter.currentTurnIndex + 1}/${encounter.participants.length}`);
+  content.push(`Round ${encounter.round} • Turn ${encounter.currentTurnIndex + 1}/${encounter.participants.length}`);
   content.push('');
   
   // Current turn highlight
-  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
-  content.push(centerText(`Ã¢â€“Â¶ ${current.name}'s Turn Ã¢â€”â‚¬`, ENCOUNTER_WIDTH));
-  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
+  content.push('•'.repeat(ENCOUNTER_WIDTH));
+  content.push(centerText(`▶ ${current.name}'s Turn ─`, ENCOUNTER_WIDTH));
+  content.push('•'.repeat(ENCOUNTER_WIDTH));
   content.push('');
   
   // Initiative order with full stats
   content.push('INITIATIVE ORDER:');
-  content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
+  content.push('─'.repeat(ENCOUNTER_WIDTH));
   
   // Column headers
   content.push('  # Name            Init  HP        AC  Conditions');
-  content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
+  content.push('─'.repeat(ENCOUNTER_WIDTH));
   
   for (let i = 0; i < encounter.participants.length; i++) {
     const p = encounter.participants[i];
@@ -1787,7 +1787,7 @@ function formatEncounterStandard(
     const isCurrent = i === encounter.currentTurnIndex;
     
     // Turn indicator
-    const marker = isCurrent ? 'Ã¢â€“Â¶' : ' ';
+    const marker = isCurrent ? '▶' : ' ';
     
     // Format columns
     const order = String(i + 1).padStart(2);
@@ -1831,7 +1831,7 @@ function formatEncounterStandard(
     if (hasTerrain) {
       content.push('');
       content.push('TERRAIN:');
-      content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
+      content.push('─'.repeat(ENCOUNTER_WIDTH));
       
       if (t.obstacles && t.obstacles.length > 0) {
         content.push(`  obstacles: ${t.obstacles.join(', ')}`);
@@ -1863,13 +1863,13 @@ function formatEncounterDetailed(
   
   // Header with all metadata
   content.push(padText(`Encounter: ${encounter.id}`, ENCOUNTER_WIDTH, 'left'));
-  content.push(padText(`Round ${encounter.round} Ã¢â‚¬Â¢ Turn ${encounter.currentTurnIndex + 1}/${encounter.participants.length}`, ENCOUNTER_WIDTH, 'left'));
+  content.push(padText(`Round ${encounter.round} • Turn ${encounter.currentTurnIndex + 1}/${encounter.participants.length}`, ENCOUNTER_WIDTH, 'left'));
   content.push('');
   
   // Environment section
-  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
+  content.push('•'.repeat(ENCOUNTER_WIDTH));
   content.push(centerText('ENVIRONMENT', ENCOUNTER_WIDTH));
-  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
+  content.push('•'.repeat(ENCOUNTER_WIDTH));
   
   // Lighting - use shared constant
   content.push(padText(`Lighting: ${LIGHTING_DISPLAY[encounter.lighting] || encounter.lighting}`, ENCOUNTER_WIDTH, 'left'));
@@ -1898,14 +1898,14 @@ function formatEncounterDetailed(
   content.push('');
   
   // Current turn highlight
-  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
-  content.push(centerText(`Ã¢â€“Â¶ ${current.name}'s Turn Ã¢â€”â‚¬`, ENCOUNTER_WIDTH));
-  content.push('Ã¢â€¢Â'.repeat(ENCOUNTER_WIDTH));
+  content.push('•'.repeat(ENCOUNTER_WIDTH));
+  content.push(centerText(`▶ ${current.name}'s Turn ─`, ENCOUNTER_WIDTH));
+  content.push('•'.repeat(ENCOUNTER_WIDTH));
   content.push('');
   
   // Detailed participant list
   content.push(padText('COMBATANTS:', ENCOUNTER_WIDTH, 'left'));
-  content.push('Ã¢â€â‚¬'.repeat(ENCOUNTER_WIDTH));
+  content.push('─'.repeat(ENCOUNTER_WIDTH));
   
   for (let i = 0; i < encounter.participants.length; i++) {
     const p = encounter.participants[i];
@@ -1945,7 +1945,7 @@ function formatEncounterDetailed(
     if (conditions.length > 0) {
       content.push(padText('   Conditions:', ENCOUNTER_WIDTH, 'left'));
       for (const c of conditions) {
-        let condLine = `     Ã¢â‚¬Â¢ ${c.condition}`;
+        let condLine = `     • ${c.condition}`;
         if (c.duration && typeof c.duration === 'number') condLine += ` (${c.duration} rounds)`;
         else if (c.duration) condLine += ` (${c.duration})`;
         if (c.source) condLine += ` [${c.source}]`;
@@ -2329,26 +2329,26 @@ function handleDashAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} DASHES!`, 50));
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(50));
+  content.push('─'.repeat(50));
   content.push('');
-  content.push(centerText(`Movement: ${actor.speed}ft Ã¢â€ â€™ ${actor.speed * 2}ft`, 50));
+  content.push(centerText(`Movement: ${actor.speed}ft → ${actor.speed * 2}ft`, 50));
   content.push(centerText('(Doubled for this turn)', 50));
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(50));
+  content.push('─'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
 
   // Handle movement if specified
   if (input.moveTo) {
     content.push('');
-    content.push('Ã¢â€¢Â'.repeat(50));
+    content.push('•'.repeat(50));
     content.push('');
     
     // Check for opportunity attacks
     const oaResults = checkOpportunityAttacks(encounter, actor, input.moveTo, tracker.disengagedThisTurn);
     
     for (const oa of oaResults) {
-      content.push(centerText(`Ã¢Å¡â€ OPPORTUNITY ATTACK Ã¢Å¡â€`, 50));
+      content.push(centerText(`⚔ OPPORTUNITY ATTACK ⚔`, 50));
       content.push(centerText(`${oa.attackerName} attacks!`, 50));
       content.push(centerText(oa.result, 50));
       content.push('');
@@ -2521,16 +2521,16 @@ function formatAttackResult(
   // Header
   content.push(centerText(`${attackerName} ATTACKS ${targetName}`, WIDTH));
   content.push('');
-  content.push('Ã¢â€¢Â'.repeat(WIDTH));
+  content.push('•'.repeat(WIDTH));
   content.push('');
 
   // Roll info
   if (advantage) {
-    content.push(centerText('Ã¢Å¡â€ ATTACK ROLL (ADVANTAGE) Ã¢Å¡â€', WIDTH));
+    content.push(centerText('⚔ ATTACK ROLL (ADVANTAGE) ⚔', WIDTH));
   } else if (disadvantage) {
-    content.push(centerText('Ã¢Å¡â€ ATTACK ROLL (DISADVANTAGE) Ã¢Å¡â€', WIDTH));
+    content.push(centerText('⚔ ATTACK ROLL (DISADVANTAGE) ⚔', WIDTH));
   } else {
-    content.push(centerText('Ã¢Å¡â€ ATTACK ROLL Ã¢Å¡â€', WIDTH));
+    content.push(centerText('⚔ ATTACK ROLL ⚔', WIDTH));
   }
   content.push('');
   content.push(centerText(`Roll: ${rollDescription}`, WIDTH));
@@ -2539,17 +2539,17 @@ function formatAttackResult(
 
   // Result
   if (isCritical) {
-    content.push(centerText('Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦ CRITICAL HIT! Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦', WIDTH));
+    content.push(centerText('★★★ CRITICAL HIT! ★★★', WIDTH));
   } else if (isNat1) {
-    content.push(centerText('Ã¢Å“â€” CRITICAL MISS Ã¢Å“â€”', WIDTH));
+    content.push(centerText('✗ CRITICAL MISS ✗', WIDTH));
   } else if (isHit) {
-    content.push(centerText('Ã¢Å“â€œ HIT Ã¢Å“â€œ', WIDTH));
+    content.push(centerText('✓ HIT ✓', WIDTH));
   } else {
-    content.push(centerText('Ã¢Å“â€” MISS Ã¢Å“â€”', WIDTH));
+    content.push(centerText('✗ MISS ✗', WIDTH));
   }
 
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(WIDTH));
+  content.push('─'.repeat(WIDTH));
   content.push('');
 
   // Damage (if hit)
@@ -2561,27 +2561,27 @@ function formatAttackResult(
 
     // HP bar
     const hpPercent = Math.floor((newHp / maxHp) * 20);
-    const hpBar = 'Ã¢â€“Ë†'.repeat(hpPercent) + 'Ã¢â€“â€˜'.repeat(20 - hpPercent);
-    content.push(centerText(`${targetName}: ${oldHp} Ã¢â€ â€™ ${newHp}/${maxHp} HP`, WIDTH));
+    const hpBar = '█'.repeat(hpPercent) + '░'.repeat(20 - hpPercent);
+    content.push(centerText(`${targetName}: ${oldHp} → ${newHp}/${maxHp} HP`, WIDTH));
     content.push(centerText(`[${hpBar}]`, WIDTH));
 
     if (newHp === 0) {
       content.push('');
-      content.push(centerText('Ã¢ËœÂ  TARGET DOWN Ã¢ËœÂ ', WIDTH));
+      content.push(centerText('☠ TARGET DOWN ☠', WIDTH));
     }
   }
 
   // Movement (if any)
   if (movementInfo) {
     content.push('');
-    content.push('Ã¢â€â‚¬'.repeat(WIDTH));
+    content.push('─'.repeat(WIDTH));
     content.push('');
     content.push(padText(`Movement: ${movementInfo}`, WIDTH, 'left'));
   }
 
   // Footer
   content.push('');
-  content.push('Ã¢â€¢Â'.repeat(WIDTH));
+  content.push('•'.repeat(WIDTH));
   content.push('');
   content.push(padText(`Action Cost: ${actionCost}`, WIDTH, 'left'));
 
@@ -2603,12 +2603,12 @@ function handleDisengageAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} DISENGAGES!`, 50));
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(50));
+  content.push('─'.repeat(50));
   content.push('');
   content.push(centerText('Movement will not provoke', 50));
   content.push(centerText('opportunity attacks this turn', 50));
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(50));
+  content.push('─'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
 
@@ -2626,13 +2626,13 @@ function handleDodgeAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} DODGES!`, 50));
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(50));
+  content.push('─'.repeat(50));
   content.push('');
   content.push(centerText('Until next turn:', 50));
-  content.push(centerText('Ã¢â‚¬Â¢ Attacks against you have DISADVANTAGE', 50));
-  content.push(centerText('Ã¢â‚¬Â¢ DEX saves have ADVANTAGE', 50));
+  content.push(centerText('• Attacks against you have DISADVANTAGE', 50));
+  content.push(centerText('• DEX saves have ADVANTAGE', 50));
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(50));
+  content.push('─'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
 
@@ -2662,7 +2662,7 @@ function handleGrappleAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} GRAPPLES ${target.name.toUpperCase()}`, 50));
   content.push('');
-  content.push('Ã¢â€¢Â'.repeat(50));
+  content.push('•'.repeat(50));
   content.push('');
   content.push(centerText('CONTESTED ATHLETICS CHECK', 50));
   content.push('');
@@ -2671,19 +2671,19 @@ function handleGrappleAction(
   content.push('');
 
   if (success) {
-    content.push(centerText('Ã¢Å“â€œ GRAPPLE SUCCESS! Ã¢Å“â€œ', 50));
+    content.push(centerText('✓ GRAPPLE SUCCESS! ✓', 50));
     content.push('');
     content.push(centerText(`${target.name} is now GRAPPLED`, 50));
     content.push(centerText('(Speed 0, can attempt escape)', 50));
     // Apply grappled condition would go here via manage_condition
   } else {
-    content.push(centerText('Ã¢Å“â€” GRAPPLE FAILED Ã¢Å“â€”', 50));
+    content.push(centerText('✗ GRAPPLE FAILED ✗', 50));
     content.push('');
     content.push(centerText(`${target.name} breaks free!`, 50));
   }
 
   content.push('');
-  content.push('Ã¢â€¢Â'.repeat(50));
+  content.push('•'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
 
@@ -2715,7 +2715,7 @@ function handleShoveAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} SHOVES ${target.name.toUpperCase()}`, 50));
   content.push('');
-  content.push('Ã¢â€¢Â'.repeat(50));
+  content.push('•'.repeat(50));
   content.push('');
   content.push(centerText('CONTESTED ATHLETICS CHECK', 50));
   content.push('');
@@ -2725,7 +2725,7 @@ function handleShoveAction(
 
   if (success) {
     if (shoveDirection === 'prone') {
-      content.push(centerText('Ã¢Å“â€œ SHOVE SUCCESS! Ã¢Å“â€œ', 50));
+      content.push(centerText('✓ SHOVE SUCCESS! ✓', 50));
       content.push('');
       content.push(centerText(`${target.name} is knocked PRONE`, 50));
       // Apply prone condition would go here
@@ -2741,19 +2741,19 @@ function handleShoveAction(
         target.position.y += Math.sign(dy);
       }
 
-      content.push(centerText('Ã¢Å“â€œ SHOVE SUCCESS! Ã¢Å“â€œ', 50));
+      content.push(centerText('✓ SHOVE SUCCESS! ✓', 50));
       content.push('');
       content.push(centerText(`${target.name} pushed 5ft away!`, 50));
       content.push(centerText(`New position: (${target.position.x}, ${target.position.y})`, 50));
     }
   } else {
-    content.push(centerText('Ã¢Å“â€” SHOVE FAILED Ã¢Å“â€”', 50));
+    content.push(centerText('✗ SHOVE FAILED ✗', 50));
     content.push('');
     content.push(centerText(`${target.name} holds their ground!`, 50));
   }
 
   content.push('');
-  content.push('Ã¢â€¢Â'.repeat(50));
+  content.push('•'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
 
@@ -2810,12 +2810,12 @@ function handleCastSpellAction(
     const content: string[] = [];
     content.push(centerText(`${actor.name.toUpperCase()} CASTS CANTRIP`, 50));
     content.push('');
-    content.push('Ã¢â€¢Â'.repeat(50));
+    content.push('•'.repeat(50));
     content.push('');
     content.push(centerText(`Spell: ${spellName}`, 50));
     content.push(centerText('No spell slot required', 50));
     content.push('');
-    content.push('Ã¢â€¢Â'.repeat(50));
+    content.push('•'.repeat(50));
     content.push('');
     content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
     
@@ -2843,7 +2843,7 @@ function handleCastSpellAction(
   const content: string[] = [];
   content.push(centerText(`${actor.name.toUpperCase()} CASTS SPELL`, 50));
   content.push('');
-  content.push('Ã¢â€¢Â'.repeat(50));
+  content.push('•'.repeat(50));
   content.push('');
   content.push(centerText(`Spell: ${spellName}`, 50));
   content.push(centerText(`Slot Used: ${slotLabel}`, 50));
@@ -2861,10 +2861,10 @@ function handleCastSpellAction(
     }
   }
   
-  content.push('Ã¢â€¢Â'.repeat(50));
+  content.push('•'.repeat(50));
   content.push('');
   content.push(padText(`Action Cost: ${input.actionCost || 'action'}`, 50, 'left'));
-  content.push(padText('Ã¢Å“â€œ Spell slot expended', 50, 'left'));
+  content.push(padText('✓ Spell slot expended', 50, 'left'));
   
   return createBox('CAST SPELL', content, undefined, 'HEAVY');
 }
@@ -2961,11 +2961,11 @@ function formatConditionName(condition: string): string {
  * @param current - Current HP
  * @param max - Maximum HP
  * @param width - Bar width in characters (default 20)
- * @returns String like "[Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜]"
+ * @returns String like "[█████████░░░░░░░░░░░]"
  */
 function generateHpBar(current: number, max: number, width: number = 20): string {
   const filledCount = Math.max(0, Math.min(width, Math.floor((current / max) * width)));
-  return `[${'Ã¢â€“Ë†'.repeat(filledCount)}${'Ã¢â€“â€˜'.repeat(width - filledCount)}]`;
+  return `[${'█'.repeat(filledCount)}${'░'.repeat(width - filledCount)}]`;
 }
 
 /**
@@ -3081,26 +3081,26 @@ export function advanceTurn(input: AdvanceTurnInput): string {
 
   // Death save reminder for previous combatant if they're at 0 HP
   if (previousCombatant && needsDeathSave(previousCombatant)) {
-    content.push(centerText(`Ã¢Å¡Â  ${previousCombatant.name} NEEDS DEATH SAVE Ã¢Å¡Â `, TURN_DISPLAY_WIDTH));
+    content.push(centerText(`⚠ ${previousCombatant.name} NEEDS DEATH SAVE ⚠`, TURN_DISPLAY_WIDTH));
     content.push(padText(`${previousCombatant.name} is unconscious at 0 HP!`, TURN_DISPLAY_WIDTH, 'left'));
     content.push('');
   }
 
   // Header with round info
   if (isNewRound) {
-    content.push(centerText(`Ã¢Ëœâ€¦ NEW ROUND ${encounter.round} Ã¢Ëœâ€¦`, TURN_DISPLAY_WIDTH));
+    content.push(centerText(`★ NEW ROUND ${encounter.round} ★`, TURN_DISPLAY_WIDTH));
     content.push(centerText('Round Transition', TURN_DISPLAY_WIDTH));
   } else {
     content.push(centerText(`ROUND ${encounter.round}`, TURN_DISPLAY_WIDTH));
   }
   content.push('');
-  content.push('Ã¢â€¢Â'.repeat(TURN_DISPLAY_WIDTH));
+  content.push('•'.repeat(TURN_DISPLAY_WIDTH));
   content.push('');
 
   // Current combatant's turn header
   content.push(centerText(`${currentCombatant.name}'s Turn`, TURN_DISPLAY_WIDTH));
   content.push('');
-  content.push('Ã¢â€â‚¬'.repeat(TURN_DISPLAY_WIDTH));
+  content.push('─'.repeat(TURN_DISPLAY_WIDTH));
   content.push('');
 
   // HP and status with visual bar
@@ -3110,7 +3110,7 @@ export function advanceTurn(input: AdvanceTurnInput): string {
 
   // Death save reminder for current combatant (0 HP)
   if (needsDeathSave(currentCombatant)) {
-    content.push(centerText('Ã¢Å¡Â  UNCONSCIOUS - DEATH SAVE REQUIRED Ã¢Å¡Â ', TURN_DISPLAY_WIDTH));
+    content.push(centerText('⚠ UNCONSCIOUS - DEATH SAVE REQUIRED ⚠', TURN_DISPLAY_WIDTH));
     content.push(padText(`${currentCombatant.name} is at 0 HP!`, TURN_DISPLAY_WIDTH, 'left'));
     content.push('');
   }
@@ -3120,7 +3120,7 @@ export function advanceTurn(input: AdvanceTurnInput): string {
   if (currentConditions.length > 0) {
     content.push(padText('Active Conditions:', TURN_DISPLAY_WIDTH, 'left'));
     for (const cond of currentConditions) {
-      let condStr = `  Ã¢â‚¬Â¢ ${formatConditionName(String(cond.condition))}`;
+      let condStr = `  • ${formatConditionName(String(cond.condition))}`;
       if (cond.roundsRemaining !== undefined) {
         condStr += ` (${cond.roundsRemaining} round${cond.roundsRemaining !== 1 ? 's' : ''})`;
       } else if (cond.duration && typeof cond.duration === 'string') {
@@ -3133,11 +3133,11 @@ export function advanceTurn(input: AdvanceTurnInput): string {
 
   // Display expired conditions from this turn transition
   if (tickResults.expired.length > 0) {
-    content.push('Ã¢â€â‚¬'.repeat(TURN_DISPLAY_WIDTH));
+    content.push('─'.repeat(TURN_DISPLAY_WIDTH));
     content.push('');
     content.push(padText('Conditions Expired:', TURN_DISPLAY_WIDTH, 'left'));
     for (const exp of tickResults.expired) {
-      content.push(padText(`  Ã¢â‚¬Â¢ ${exp.targetName}: ${exp.condition} has ended/expired/removed`, TURN_DISPLAY_WIDTH, 'left'));
+      content.push(padText(`  • ${exp.targetName}: ${exp.condition} has ended/expired/removed`, TURN_DISPLAY_WIDTH, 'left'));
     }
     content.push('');
   }
@@ -3145,26 +3145,26 @@ export function advanceTurn(input: AdvanceTurnInput): string {
   // Display conditions with updated durations
   if (tickResults.updated.length > 0) {
     if (tickResults.expired.length === 0) {
-      content.push('Ã¢â€â‚¬'.repeat(TURN_DISPLAY_WIDTH));
+      content.push('─'.repeat(TURN_DISPLAY_WIDTH));
       content.push('');
     }
     content.push(padText('Condition Durations Updated:', TURN_DISPLAY_WIDTH, 'left'));
     for (const upd of tickResults.updated) {
-      content.push(padText(`  Ã¢â‚¬Â¢ ${upd.targetName}: ${upd.condition} - ${upd.remaining} round${upd.remaining !== 1 ? 's' : ''} remaining`, TURN_DISPLAY_WIDTH, 'left'));
+      content.push(padText(`  • ${upd.targetName}: ${upd.condition} - ${upd.remaining} round${upd.remaining !== 1 ? 's' : ''} remaining`, TURN_DISPLAY_WIDTH, 'left'));
     }
     content.push('');
   }
 
   // Effect processing indicator
   if (processEffects) {
-    content.push('Ã¢â€â‚¬'.repeat(TURN_DISPLAY_WIDTH));
+    content.push('─'.repeat(TURN_DISPLAY_WIDTH));
     content.push('');
     content.push(padText('Start of Turn Effects processed', TURN_DISPLAY_WIDTH, 'left'));
     content.push('');
   }
 
   // Initiative order preview
-  content.push('Ã¢â€¢Â'.repeat(TURN_DISPLAY_WIDTH));
+  content.push('•'.repeat(TURN_DISPLAY_WIDTH));
   content.push('');
   content.push(padText('Initiative Order (Next up):', TURN_DISPLAY_WIDTH, 'left'));
   
@@ -3173,7 +3173,7 @@ export function advanceTurn(input: AdvanceTurnInput): string {
   for (let i = 0; i < previewCount; i++) {
     const idx = (encounter.currentTurnIndex + i) % encounter.participants.length;
     const p = encounter.participants[idx];
-    const marker = i === 0 ? 'Ã¢â€ â€™ ' : '  ';
+    const marker = i === 0 ? '→ ' : '  ';
     const status = p.hp === 0 ? ' [DOWN]' : '';
     content.push(padText(`${marker}${p.initiative}: ${p.name}${status}`, TURN_DISPLAY_WIDTH, 'left'));
   }
@@ -3365,7 +3365,7 @@ type DeathSaveOutcome =
 function determineDeathSaveOutcome(naturalRoll: number, total: number, state: DeathSaveState): DeathSaveOutcome {
   // Natural 20 always revives
   if (naturalRoll === 20) {
-    return { type: 'nat20', message: 'Ã¢Å“Â¨ NATURAL 20! Ã¢Å“Â¨ Regains consciousness at 1 HP!' };
+    return { type: 'nat20', message: '✨ NATURAL 20! ✨ Regains consciousness at 1 HP!' };
   }
   
   // Natural 1 always counts as 2 failures
@@ -3374,14 +3374,14 @@ function determineDeathSaveOutcome(naturalRoll: number, total: number, state: De
     if (newFailures >= 3) {
       return { type: 'death', message: 'Ã°Å¸â€™â‚¬ NATURAL 1! Two failures - DEATH! Ã°Å¸â€™â‚¬' };
     }
-    return { type: 'nat1', message: 'Ã¢Å¡Â Ã¯Â¸Â NATURAL 1! Two failures added!' };
+    return { type: 'nat1', message: '⚠️ NATURAL 1! Two failures added!' };
   }
   
   // Check total for success/failure
   if (total >= 10) {
     const newSuccesses = state.successes + 1;
     if (newSuccesses >= 3) {
-      return { type: 'stabilized', message: 'Ã¢Ëœâ€¦ STABILIZED! Ã¢Ëœâ€¦ No longer dying.' };
+      return { type: 'stabilized', message: '★ STABILIZED! ★ No longer dying.' };
     }
     return { type: 'success', message: 'Success! Holding on...' };
   } else {
@@ -3539,41 +3539,41 @@ function getTensionIndicator(state: DeathSaveState, outcome: DeathSaveOutcome): 
   
   // Critical tension - one roll from death
   if (state.failures === 2) {
-    return 'Ã¢Å¡Â  CRITICAL: One more failure means death!';
+    return '⚠ CRITICAL: One more failure means death!';
   }
   
   // High tension - close to death
   if (state.failures === 2 && state.successes === 0) {
-    return 'Ã¢Å¡Â  Teetering on the edge...';
+    return '⚠ Teetering on the edge...';
   }
   
   // Hope rising - close to stability  
   if (state.successes === 2) {
-    return 'Ã¢Å“Â§ Hope rises - one more success to stabilize!';
+    return '✧ Hope rises - one more success to stabilize!';
   }
   
   // Mixed tension
   if (state.failures >= 1 && state.successes >= 1) {
-    return 'Ã¢â€”â€¡ The struggle continues...';
+    return '◇ The struggle continues...';
   }
   
   return null;
 }
 
 /**
- * Format the visual death save tracker (Ã¢â€”ÂÃ¢â€”ÂÃ¢â€”â€¹ style).
+ * Format the visual death save tracker (●●○ style).
  * 
  * Uses visual symbols for intuitive at-a-glance status:
- * - Ã¢â€”Â (filled circle) = success earned
- * - Ã¢Å“â€¢ (X mark) = failure accrued  
- * - Ã¢â€”â€¹ (empty circle) = slot remaining
+ * - ● (filled circle) = success earned
+ * - ✕ (X mark) = failure accrued  
+ * - ○ (empty circle) = slot remaining
  * 
  * @param state - Current death save state
- * @returns Formatted tracker string like "Successes: Ã¢â€”ÂÃ¢â€”ÂÃ¢â€”â€¹  Failures: Ã¢Å“â€¢Ã¢â€”â€¹Ã¢â€”â€¹"
+ * @returns Formatted tracker string like "Successes: ●●○  Failures: ✕○○"
  */
 function formatDeathSaveTracker(state: DeathSaveState): string {
-  const successMarkers = 'Ã¢â€”Â'.repeat(state.successes) + 'Ã¢â€”â€¹'.repeat(3 - state.successes);
-  const failureMarkers = 'Ã¢Å“â€¢'.repeat(state.failures) + 'Ã¢â€”â€¹'.repeat(3 - state.failures);
+  const successMarkers = '●'.repeat(state.successes) + '○'.repeat(3 - state.successes);
+  const failureMarkers = '✕'.repeat(state.failures) + '○'.repeat(3 - state.failures);
   
   return `Successes: ${successMarkers}  Failures: ${failureMarkers}`;
 }
@@ -3621,7 +3621,7 @@ function formatDeathSaveResult(
   if (rollMode !== 'normal') {
     const modeLabel = rollMode === 'advantage' ? 'ADVANTAGE' : 'DISADVANTAGE';
     const kept = rollMode === 'advantage' ? 'higher' : 'lower';
-    content.push(padText(`Roll (${modeLabel}): ${allRolls.join(', ')} Ã¢â€ â€™ kept ${kept}: ${usedRoll}`, DEATH_SAVE_DISPLAY_WIDTH, 'left'));
+    content.push(padText(`Roll (${modeLabel}): ${allRolls.join(', ')} → kept ${kept}: ${usedRoll}`, DEATH_SAVE_DISPLAY_WIDTH, 'left'));
   } else {
     content.push(padText(`Roll: ${usedRoll}`, DEATH_SAVE_DISPLAY_WIDTH, 'left'));
   }
@@ -3636,7 +3636,7 @@ function formatDeathSaveResult(
   content.push('');
   
   // Outcome message (dramatic)
-  content.push('Ã¢â€â‚¬'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
+  content.push('─'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
   content.push('');
   content.push(centerText(outcome.message, DEATH_SAVE_DISPLAY_WIDTH));
   content.push('');
@@ -3649,26 +3649,26 @@ function formatDeathSaveResult(
   }
   
   // Death save tracker
-  content.push('Ã¢â€â‚¬'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
+  content.push('─'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
   content.push('');
   content.push(centerText(formatDeathSaveTracker(state), DEATH_SAVE_DISPLAY_WIDTH));
   content.push('');
   
   // Final status with appropriate gravitas
   if (state.isDead) {
-    content.push('Ã¢â€¢Â'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
+    content.push('•'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
     content.push('');
-    content.push(centerText(`Ã¢ËœÂ  ${characterName} has died. Ã¢ËœÂ `, DEATH_SAVE_DISPLAY_WIDTH));
+    content.push(centerText(`☠ ${characterName} has died. ☠`, DEATH_SAVE_DISPLAY_WIDTH));
     content.push(centerText('Rest in peace.', DEATH_SAVE_DISPLAY_WIDTH));
   } else if (state.isStable) {
-    content.push('Ã¢â€¢Â'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
+    content.push('•'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
     content.push('');
-    content.push(centerText(`Ã¢Å“â€œ ${characterName} is stable. Ã¢Å“â€œ`, DEATH_SAVE_DISPLAY_WIDTH));
+    content.push(centerText(`✓ ${characterName} is stable. ✓`, DEATH_SAVE_DISPLAY_WIDTH));
     content.push(centerText('Unconscious but no longer dying.', DEATH_SAVE_DISPLAY_WIDTH));
   } else if (outcome.type === 'nat20') {
-    content.push('Ã¢â€¢Â'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
+    content.push('•'.repeat(DEATH_SAVE_DISPLAY_WIDTH));
     content.push('');
-    content.push(centerText(`Ã¢Å¡â€ ${characterName} is back in the fight! Ã¢Å¡â€`, DEATH_SAVE_DISPLAY_WIDTH));
+    content.push(centerText(`⚔ ${characterName} is back in the fight! ⚔`, DEATH_SAVE_DISPLAY_WIDTH));
     content.push(centerText('HP: 1', DEATH_SAVE_DISPLAY_WIDTH));
   }
   
@@ -3725,32 +3725,32 @@ export type RenderBattlefieldInput = z.input<typeof renderBattlefieldSchema>;
 /** Legend detail level type */
 export type LegendDetailLevel = 'minimal' | 'standard' | 'detailed';
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 // BATTLEFIELD CONSTANTS
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 
 /** Symbols for terrain features */
 const TERRAIN_SYMBOLS = {
   floor: 'Ã‚Â·',
-  wall: 'Ã¢â€“Ë†',
-  difficultTerrain: 'Ã¢â€“â€˜',
-  water: 'Ã¢â€°Ë†',
+  wall: '█',
+  difficultTerrain: '░',
+  water: '≈',
   hazard: '*',
 } as const;
 
 /** Symbols for entity states */
 const ENTITY_STATE_SYMBOLS = {
-  dead: 'Ã¢â‚¬Â ',
-  unconscious: 'Ã¢â€”â€¹',
-  currentTurn: 'Ã¢â€“Â¶',
+  dead: '†',
+  unconscious: '○',
+  currentTurn: '▶',
 } as const;
 
 /** Width of the battlefield display header/dividers */
 const BATTLEFIELD_DISPLAY_WIDTH = 67;
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 // ENTITY STATE HELPERS
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 
 /** Computed state information for a participant */
 interface EntityStateInfo {
@@ -3798,9 +3798,9 @@ function getEntityStateInfo(
   return { isUnconscious, isDead, isBloodied, isCurrentTurn, conditions, displaySymbol };
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 // SYMBOL ASSIGNMENT
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 
 /**
  * Assign unique symbols to all entities in an encounter.
@@ -3880,9 +3880,9 @@ function assignSymbolsToGroup(
   }
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 // TERRAIN HELPERS
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 
 /** Terrain cell types */
 type TerrainCellType = 'wall' | 'difficult' | 'water' | 'hazard' | 'floor';
@@ -3926,9 +3926,9 @@ function getTerrainSymbol(terrainType: TerrainCellType): string {
   }
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 // VIEWPORT CALCULATION
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 
 /** Calculated viewport bounds */
 interface ViewportBounds {
@@ -3982,9 +3982,9 @@ function calculateViewport(
   return { x: viewX, y: viewY, width: viewWidth, height: viewHeight };
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 // GRID BUILDING
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 
 /**
  * Build a position-to-entities lookup map for efficient grid rendering.
@@ -4052,9 +4052,9 @@ function buildBattlefieldGrid(
   return grid;
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 // LEGEND FORMATTING
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 
 /**
  * Format the position string for an entity, optionally including elevation.
@@ -4081,7 +4081,7 @@ function formatPosition(
  * 
  * @param hp - Current HP
  * @param maxHp - Maximum HP
- * @param isBloodied - Whether the entity is bloodied (Ã¢â€°Â¤50% HP)
+ * @param isBloodied - Whether the entity is bloodied (≤50% HP)
  * @param isDead - Whether the entity is dead
  * @param isUnconscious - Whether the entity is unconscious/dying
  * @returns Formatted HP string like "30/45" or "30/45 [BLOODIED]"
@@ -4149,8 +4149,8 @@ function formatEntityLegendLine(
     
     const deathState = getDeathSaveState(encounterId, participant.id);
     if (deathState && participant.hp === 0 && !deathState.isDead && !deathState.isStable) {
-      const successMarkers = 'Ã¢â€”Â'.repeat(deathState.successes) + 'Ã¢â€”â€¹'.repeat(3 - deathState.successes);
-      const failureMarkers = 'Ã¢Å“â€¢'.repeat(deathState.failures) + 'Ã¢â€”â€¹'.repeat(3 - deathState.failures);
+      const successMarkers = '●'.repeat(deathState.successes) + '○'.repeat(3 - deathState.successes);
+      const failureMarkers = '✕'.repeat(deathState.failures) + '○'.repeat(3 - deathState.failures);
       line += ` | Death Saves: ${successMarkers} / ${failureMarkers}`;
     }
   }
@@ -4158,9 +4158,9 @@ function formatEntityLegendLine(
   return line;
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 // MAIN RENDER FUNCTION
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ─────────────────────────────────────────────────────────────
 
 /**
  * Render an encounter battlefield as an ASCII tactical map.
@@ -4212,9 +4212,9 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
   const lines: string[] = [];
   
   // Header
-  lines.push('Ã¢â€¢Â'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
+  lines.push('•'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
   lines.push(`                    BATTLEFIELD - Round ${round}`);
-  lines.push('Ã¢â€¢Â'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
+  lines.push('•'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
   lines.push('');
   
   // Coordinate headers (x-axis)
@@ -4225,8 +4225,8 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
   // Grid rows with y-axis coordinates
   for (let i = 0; i < grid.length; i++) {
     const y = viewportBounds.y + i;
-    const prefix = showCoordinates ? `${y.toString().padStart(2)} Ã¢â€â€š` : 'Ã¢â€â€š';
-    lines.push(`${prefix}${grid[i].join('Ã¢â€â€š')}Ã¢â€â€š`);
+    const prefix = showCoordinates ? `${y.toString().padStart(2)} └` : '└';
+    lines.push(`${prefix}${grid[i].join('└')}└`);
   }
   lines.push('');
   
@@ -4235,7 +4235,7 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
   
   // Entity legend
   if (showLegend) {
-    lines.push('Ã¢â€â‚¬'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
+    lines.push('─'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
     lines.push('COMBATANTS:');
     lines.push('');
     
@@ -4790,7 +4790,7 @@ function formatEndEncounter(
     content.push('PARTICIPANTS:');
     
     for (const p of summary.participants) {
-      const marker = p.status === 'alive' ? 'Ã¢Å“â€œ' : 'Ã¢Å“â€”';
+      const marker = p.status === 'alive' ? '✓' : '✗';
       if (p.status === 'alive') {
         content.push(`  ${marker} ${p.name} - ALIVE (${p.hp}/${p.maxHp} HP)`);
       } else {

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Tool Registry - Static Loading
  * All 50 tools are registered here at startup.
  */
@@ -257,7 +257,7 @@ export const toolRegistry: Record<string, ToolDefinition> = {
 
           content.push(`ROLLING ${results.length} DICE ${results.length === 1 ? 'EXPRESSION' : 'EXPRESSIONS'}`);
           content.push('');
-          content.push('Ã¢â€â‚¬'.repeat(40));
+          content.push('─'.repeat(40));
           content.push('');
 
           for (let i = 0; i < results.length; i++) {
@@ -278,7 +278,7 @@ export const toolRegistry: Record<string, ToolDefinition> = {
             content.push('');
           }
 
-          content.push('Ã¢â€â‚¬'.repeat(40));
+          content.push('─'.repeat(40));
           content.push('');
           content.push(`TOTAL ACROSS ALL ROLLS: ${results.reduce((sum, r) => sum + r.total, 0)}`);
 
@@ -472,7 +472,7 @@ export const toolRegistry: Record<string, ToolDefinition> = {
 
   level_up: {
     name: 'level_up',
-    description: 'Level up a character. Increases level, HP (roll/average/max/manual), proficiency bonus, and spell slots. Supports custom class hit dice and resource scaling. Multi-level jumps allowed (e.g., 1Ã¢â€ â€™5). Batch support for party level-ups. Optionally track new features and spells learned.',
+    description: 'Level up a character. Increases level, HP (roll/average/max/manual), proficiency bonus, and spell slots. Supports custom class hit dice and resource scaling. Multi-level jumps allowed (e.g., 1→5). Batch support for party level-ups. Optionally track new features and spells learned.',
     inputSchema: toJsonSchema(levelUpSchema),
     handler: async (args) => {
       try {
@@ -902,7 +902,7 @@ export const toolRegistry: Record<string, ToolDefinition> = {
 
   synthesize_spell: {
     name: 'synthesize_spell',
-    description: 'Arcane Synthesis for improvised magic. Caster proposes a custom spell effect; Arcana check DC = 10 + (level Ãƒâ€” 2) + modifiers. Success creates temporary spell effect, failure may cause mishaps. Supports circumstance modifiers (ley lines, desperation, material components).',
+    description: 'Arcane Synthesis for improvised magic. Caster proposes a custom spell effect; Arcana check DC = 10 + (level × 2) + modifiers. Success creates temporary spell effect, failure may cause mishaps. Supports circumstance modifiers (ley lines, desperation, material components).',
     inputSchema: toJsonSchema(synthesizeSpellSchema),
     handler: async (args) => {
       try {
@@ -1044,7 +1044,7 @@ export async function handleToolCall(
   args: unknown
 ): Promise<CallToolResult> {
   const tool = toolRegistry[name];
-  
+
   if (!tool) {
     return error(`Unknown tool: ${name}`);
   }
