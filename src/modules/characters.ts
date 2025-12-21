@@ -656,6 +656,103 @@ function calculateResourceMax(
   }
 }
 
+// ============================================================
+// HP CALCULATION HELPERS
+// ============================================================
+
+/**
+ * Calculate HP gain for a character level-up.
+ *
+ * Implements D&D 5e HP advancement rules:
+ * - Average: (hitDie / 2) + 1 + CON modifier
+ * - Max: hitDie + CON modifier
+ * - Roll: random 1-hitDie + CON modifier
+ * - Manual: exact value provided (bypasses CON modifier)
+ *
+ * @param hitDie - Class hit die size (4, 6, 8, 10, or 12)
+ * @param conMod - Constitution modifier
+ * @param method - Calculation method: 'average', 'max', 'roll', or 'manual'
+ * @param roll - Optional value: manual HP for 'manual' method, or override roll for 'roll' method
+ * @returns HP gain (minimum 1 per D&D 5e rules)
+ *
+ * @example
+ * // Average HP for d8 class with +2 CON
+ * calculateLevelUpHp(8, 2, 'average') // => 7 (5 base + 2 CON)
+ *
+ * @example
+ * // Max HP for barbarian (d12) with +3 CON
+ * calculateLevelUpHp(12, 3, 'max') // => 15 (12 + 3)
+ *
+ * @example
+ * // Manual HP gain (e.g., DM override)
+ * calculateLevelUpHp(8, 2, 'manual', 6) // => 6 (exact value)
+ */
+function calculateLevelUpHp(
+  hitDie: number,
+  conMod: number,
+  method: 'average' | 'max' | 'roll' | 'manual',
+  roll?: number
+): number {
+  let baseHp: number;
+  
+  switch (method) {
+    case 'average':
+      // D&D 5e average: (hitDie / 2) + 1, rounded down then +1
+      baseHp = Math.floor(hitDie / 2) + 1;
+      break;
+    case 'max':
+      baseHp = hitDie;
+      break;
+    case 'roll':
+      // Use provided roll or generate random
+      baseHp = roll ?? Math.floor(Math.random() * hitDie) + 1;
+      break;
+    case 'manual':
+      // Manual bypasses CON modifier - return exact value
+      return roll ?? 1;
+    default:
+      // Default to average for unknown methods
+      baseHp = Math.floor(hitDie / 2) + 1;
+  }
+  
+  // D&D 5e rule: minimum 1 HP per level
+  return Math.max(1, baseHp + conMod);
+}
+
+/**
+ * Calculate healing from spending a hit die during rest.
+ *
+ * Implements D&D 5e short rest hit die healing:
+ * - Roll the hit die
+ * - Add Constitution modifier
+ * - Minimum 1 HP healed per die spent
+ *
+ * @param hitDie - Class hit die size (4, 6, 8, 10, or 12)
+ * @param conMod - Constitution modifier
+ * @param roll - Optional manual roll value (for testing or DM override)
+ * @returns Healing amount (minimum 1)
+ *
+ * @example
+ * // Random healing for fighter (d10) with +2 CON
+ * calculateHitDiceHealing(10, 2) // => 3-12 (1d10 + 2, min 1)
+ *
+ * @example
+ * // Fixed roll for testing
+ * calculateHitDiceHealing(8, -1, 4) // => 3 (4 - 1 = 3)
+ *
+ * @example
+ * // Negative CON with low roll still gives minimum 1
+ * calculateHitDiceHealing(6, -3, 1) // => 1 (1 - 3 = -2, clamped to 1)
+ */
+function calculateHitDiceHealing(
+  hitDie: number,
+  conMod: number,
+  roll?: number
+): number {
+  const baseRoll = roll ?? Math.floor(Math.random() * hitDie) + 1;
+  return Math.max(1, baseRoll + conMod);
+}
+
 /**
  * Calculate max HP for a character.
  * Supports custom classes via customClass.hitDie.
@@ -2875,13 +2972,13 @@ export function takeRest(input: TakeRestInput | { batch: TakeRestInput[] }): {
       changes.hitDiceAfter = hitDice.current - actualSpent;
       
       // Calculate healing: roll hit dice + CON modifier per die
-      const hitDieSize = HIT_DIE_BY_CLASS[character.class] || 8;
+      // Uses getHitDie for custom class support
+      const hitDieSize = getHitDie(character.class, character.customClass);
       const conMod = calculateModifier(character.stats.con);
       
       let totalHealing = 0;
       for (let i = 0; i < actualSpent; i++) {
-        const roll = Math.floor(Math.random() * hitDieSize) + 1;
-        totalHealing += Math.max(1, roll + conMod); // Minimum 1 HP per die
+        totalHealing += calculateHitDiceHealing(hitDieSize, conMod);
       }
       
       changes.hpAfter = Math.min(character.maxHp, character.hp + totalHealing);
@@ -4375,35 +4472,30 @@ function calculateLevelHpGain(
   manualHp?: number,
   manualRoll?: number
 ): { hpGain: number; rollDetails?: string } {
-  let baseGain: number;
+  // Manual method: use calculateLevelUpHp directly (bypasses CON modifier)
+  if (method === 'manual') {
+    const hpGain = calculateLevelUpHp(hitDie, conMod, 'manual', manualHp);
+    return { hpGain, rollDetails: 'manual' };
+  }
+
+  // For roll method, we need the actual roll value for the rollDetails string
   let rollDetails: string | undefined;
+  let rollValue: number | undefined;
 
-  switch (method) {
-    case 'roll':
-      const roll = manualRoll ?? Math.floor(Math.random() * hitDie) + 1;
-      baseGain = roll;
-      rollDetails = `d${hitDie}: ${roll}`;
-      break;
-    case 'average':
-      // Average rounded up: (hitDie / 2) + 1
-      baseGain = Math.floor(hitDie / 2) + 1;
-      break;
-    case 'max':
-      baseGain = hitDie;
-      break;
-    case 'manual':
-      // Manual already includes everything - return as-is
-      return { hpGain: manualHp!, rollDetails: 'manual' };
+  if (method === 'roll') {
+    rollValue = manualRoll ?? Math.floor(Math.random() * hitDie) + 1;
+    rollDetails = `d${hitDie}: ${rollValue}`;
   }
 
-  // Add CON modifier, enforce minimum HP per level (D&D 5e rule)
-  const totalGain = Math.max(MIN_HP_PER_LEVEL, baseGain + conMod);
-  
+  // Use the helper for actual HP calculation
+  const hpGain = calculateLevelUpHp(hitDie, conMod, method, rollValue);
+
+  // Add CON modifier details to roll string
   if (rollDetails) {
-    rollDetails += ` + ${conMod} CON = ${totalGain}`;
+    rollDetails += ` + ${conMod} CON = ${hpGain}`;
   }
 
-  return { hpGain: totalGain, rollDetails };
+  return { hpGain, rollDetails };
 }
 
 /**
