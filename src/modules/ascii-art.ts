@@ -30,6 +30,18 @@ export const BOX = {
 };
 
 // ============================================================
+// BOX STYLE TYPES
+// ============================================================
+
+/**
+ * Available box border styles for ASCII art rendering.
+ * - HEAVY: Bold double-line borders for titles and headers
+ * - LIGHT: Single-line borders for tables and data
+ * - DOUBLE: Double-line borders for critical information
+ */
+export type BoxStyle = 'HEAVY' | 'LIGHT' | 'DOUBLE';
+
+// ============================================================
 // DICE FACES (6-sided)
 // ============================================================
 
@@ -108,14 +120,31 @@ export const D20_SPECIAL: Record<number, string[]> = {
 // ============================================================
 
 /**
- * Create a bordered box with title
- * Content-aware auto-sizing: calculates optimal width from content if not specified
+ * Create an ASCII art box with content.
+ *
+ * Content-aware auto-sizing calculates optimal width from content if not specified,
+ * constrained to 40-80 character range for readability.
+ *
+ * @param title - Box title (centered in top border)
+ * @param content - Array of content lines to display inside the box
+ * @param width - Optional fixed width (auto-sizes to content if omitted)
+ * @param style - Box border style: HEAVY (bold), LIGHT (thin), or DOUBLE
+ * @returns Formatted ASCII box string with newlines
+ *
+ * @example
+ * ```typescript
+ * createBox('Stats', ['STR: 16', 'DEX: 14'], undefined, 'HEAVY');
+ * // ╔═══════════════ Stats ═══════════════╗
+ * // ║ STR: 16                              ║
+ * // ║ DEX: 14                              ║
+ * // ╚══════════════════════════════════════╝
+ * ```
  */
 export function createBox(
   title: string,
   content: string[],
   width?: number,
-  style: 'HEAVY' | 'LIGHT' | 'DOUBLE' = 'HEAVY'
+  style: BoxStyle = 'HEAVY'
 ): string {
   const box = BOX[style];
   const lines: string[] = [];
