@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { randomUUID } from 'crypto';
-import { ConditionSchema, AbilitySchema, PositionSchema, SizeSchema, DamageTypeSchema, LightSchema, type Condition, type Ability } from '../types.js';
+import { ConditionSchema, AbilitySchema, PositionSchema, SizeSchema, DamageTypeSchema, LightSchema, RollModeSchema, type Condition, type Ability } from '../types.js';
 import { fuzzyEnum } from '../fuzzy-enum.js';
 import { createBox, centerText, padText, BOX, createStatusBar } from './ascii-art.js';
 import { broadcastToEncounter } from '../websocket.js';
@@ -2992,7 +2992,7 @@ export const rollDeathSaveSchema = z.object({
   encounterId: z.string().describe('The encounter containing the dying character'),
   characterId: z.string().describe('The character making the death save'),
   modifier: z.number().optional().describe('Bonus/penalty to the roll (e.g., Bless spell gives +1d4)'),
-  rollMode: fuzzyEnum(['normal', 'advantage', 'disadvantage'] as const, 'rollMode').optional().default('normal')
+  rollMode: RollModeSchema.optional().default('normal')
     .describe('Roll mode - advantage rolls 2d20 keep highest, disadvantage keeps lowest'),
   manualRoll: z.number().min(1).max(20).optional().describe('Override the d20 roll (for testing)'),
   manualRolls: z.array(z.number().min(1).max(20)).length(2).optional()

@@ -134,6 +134,53 @@ export const LightSchema = fuzzyEnum(['bright', 'dim', 'darkness', 'magical_dark
 export type Light = z.infer<typeof LightSchema>;
 
 // ============================================================
+// ROLL MECHANICS
+// ============================================================
+
+/**
+ * Roll mode for d20 checks (advantage/disadvantage system).
+ * - 'normal': Single d20 roll
+ * - 'advantage': Roll 2d20, keep highest
+ * - 'disadvantage': Roll 2d20, keep lowest
+ */
+export const RollModeSchema = fuzzyEnum([
+  'normal',
+  'advantage',
+  'disadvantage',
+] as const, 'rollMode');
+export type RollMode = z.infer<typeof RollModeSchema>;
+
+// ============================================================
+// ABILITY SCORES
+// ============================================================
+
+/**
+ * D&D 5e ability score object.
+ * Standard six abilities used for characters and creatures.
+ */
+export interface AbilityScores {
+  str: number;
+  dex: number;
+  con: number;
+  int: number;
+  wis: number;
+  cha: number;
+}
+
+/**
+ * Zod schema for ability scores with defaults and validation.
+ * Ability scores range from 1-30 per D&D 5e rules.
+ */
+export const AbilityScoresSchema = z.object({
+  str: z.number().min(1).max(30).default(10),
+  dex: z.number().min(1).max(30).default(10),
+  con: z.number().min(1).max(30).default(10),
+  int: z.number().min(1).max(30).default(10),
+  wis: z.number().min(1).max(30).default(10),
+  cha: z.number().min(1).max(30).default(10),
+});
+
+// ============================================================
 // SPATIAL TYPES
 // ============================================================
 

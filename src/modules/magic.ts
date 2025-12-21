@@ -12,7 +12,15 @@
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
 import { createBox, centerText, BOX } from './ascii-art.js';
-import { AbilitySchema, ConditionSchema, DamageTypeSchema, AoeShapeSchema } from '../types.js';
+import {
+  AbilitySchema,
+  ConditionSchema,
+  DamageTypeSchema,
+  AoeShapeSchema,
+  PositionSchema,
+  RollModeSchema,
+  type RollMode,
+} from '../types.js';
 import { fuzzyEnum } from '../fuzzy-enum.js';
 
 // ============================================================
@@ -58,10 +66,7 @@ interface ConcentrationState {
   startedAt?: number;
 }
 
-/**
- * Roll mode for concentration saves
- */
-type RollMode = 'normal' | 'advantage' | 'disadvantage';
+// RollMode imported from ../types.js
 
 // ============================================================
 // STATE
@@ -105,7 +110,7 @@ const checkOperationSchema = z.object({
   operation: z.literal('check'),
   damage: z.number(),
   conSaveModifier: z.number().optional(),
-  rollMode: fuzzyEnum(['normal', 'advantage', 'disadvantage'] as const, 'rollMode').optional(),
+  rollMode: RollModeSchema.optional(),
   manualRoll: z.number().min(MIN_MANUAL_ROLL).max(MAX_MANUAL_ROLL).optional(),
   manualRolls: z.array(z.number().min(MIN_MANUAL_ROLL).max(MAX_MANUAL_ROLL)).length(2).optional(),
 });
@@ -963,11 +968,7 @@ const SCROLL_STATS: Array<{ saveDC: number; attackBonus: number }> = [
   { saveDC: 19, attackBonus: 11 }, // 9th
 ];
 
-const PositionSchema = z.object({
-  x: z.number(),
-  y: z.number(),
-  z: z.number().optional(),
-});
+// PositionSchema imported from ../types.js
 
 export const useScrollSchema = z.object({
   characterId: z.string(),
@@ -982,7 +983,7 @@ export const useScrollSchema = z.object({
 
   // Arcana check for higher-level scrolls
   arcanaBonus: z.number().optional(),
-  rollMode: fuzzyEnum(['normal', 'advantage', 'disadvantage'] as const, 'rollMode').optional(),
+  rollMode: RollModeSchema.optional(),
   manualRoll: z.number().min(1).max(20).optional(),
   manualRolls: z.array(z.number().min(1).max(20)).length(2).optional(),
 
@@ -1220,7 +1221,7 @@ export const synthesizeSpellSchema = z.object({
 
   // Arcana check modifiers
   arcanaBonus: z.number().optional(),
-  rollMode: fuzzyEnum(['normal', 'advantage', 'disadvantage'] as const, 'rollMode').optional(),
+  rollMode: RollModeSchema.optional(),
   manualRoll: z.number().min(1).max(20).optional(),
   manualRolls: z.array(z.number().min(1).max(20)).length(2).optional(),
 
