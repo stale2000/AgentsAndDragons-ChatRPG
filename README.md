@@ -1,109 +1,132 @@
 # ChatRPG
 
-**Lightweight D&D 5e LLM-as-DM Engine**
-A Model Context Protocol (MCP) server providing 35 core D&D 5e tools for AI Dungeon Masters.
+**D&D 5e MCP Server for AI Dungeon Masters**
 
-![Status](https://img.shields.io/badge/tests-599%2F599%20passing-brightgreen)
-![Progress](https://img.shields.io/badge/tools-18%2F35%20complete-blue)
+A Model Context Protocol (MCP) server providing 30+ D&D 5e tools for LLM-powered tabletop gaming. Features real-time combat tracking, character persistence, ASCII art rendering, and a web client interface.
+
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)
+![License](https://img.shields.io/badge/license-proprietary-red)
+
+---
+
+## Features
+
+- **30+ D&D 5e Tools** - Character creation, combat encounters, spell tracking, dice rolling
+- **ASCII Art Output** - Retro-style box drawing for immersive terminal/chat display
+- **Dual Transport** - stdio for Claude Desktop, SSE for web client
+- **Real-time Sync** - WebSocket broadcasting for encounter updates
+- **Persistent Storage** - Characters and encounters saved to AppData
+- **Web Client** - Browser-based interface with typing indicators
 
 ---
 
 ## Quick Start
 
-### 1. Build the Server
+### 1. Build & Run
 
 ```bash
 npm install
 npm run build
-```
 
-### 2. Test the Server
-
-```bash
-# Run the built-in test
-node test-server.mjs
-
-# Or manually test a tool call
+# Run with stdio (for Claude Desktop)
 npm start
-# (Server runs on stdio - send JSON-RPC messages)
+
+# Run with SSE (for web client, port 3001)
+node dist/index.js --sse
 ```
 
-### 3. Register with Claude Desktop
+### 2. Configure Claude Desktop
 
-Add this configuration to your Claude Desktop config file:
+Add to your Claude Desktop config:
 
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Linux:** `~/.config/Claude/claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
-    "rpg-lite": {
+    "chatrpg": {
       "command": "node",
-      "args": [
-        "C:\\Users\\mnehm\\AppData\\Roaming\\Roo-Code\\MCP\\rpg-lite-mcp\\dist\\index.js"
-      ]
+      "args": ["C:\\path\\to\\ChatRPG\\dist\\index.js"]
     }
   }
 }
 ```
 
-**Important:** Replace the path with your actual installation directory!
+### 3. Web Client
 
-### 4. Restart Claude Desktop
-
-The server will auto-start when Claude Desktop launches.
-
----
-
-## Available Tools (18/35)
-
-### Combat Module (9 tools - COMPLETE)
-
-- ✅ **roll_dice** - Standard dice notation with modifiers (`2d6+3`, `4d6kh3`)
-- ✅ **create_encounter** - Initialize combat encounters with participants and terrain
-- ✅ **get_encounter** - Retrieve encounter state with filtering options
-- ✅ **execute_action** - Combat hub: attack, cast_spell, dash, disengage, dodge, grapple, shove
-- ✅ **advance_turn** - Turn management with condition ticking
-- ✅ **end_encounter** - Close encounter with XP/HP summary
-- ✅ **roll_death_save** - D&D 5e death save mechanics with visual tracker
-- ✅ **manage_condition** - Apply/remove D&D 5e conditions with duration tracking
-- ✅ **render_battlefield** - ASCII tactical map rendering
-- ✅ **modify_terrain** - Terrain hazards, obstacles, difficult terrain
-
-### Characters Module (8 tools)
-
-- ✅ **create_character** - Full D&D 5e character creation with auto-calculated stats
-- ✅ **get_character** - Retrieve character by ID/name with filtering and listing
-- ✅ **update_character** - Update stats with before/after comparison, batch support
-- ✅ **delete_character** - Remove character with cascade cleanup
-- ✅ **roll_check** - Skill checks, saving throws, ability checks
-- ✅ **hp_delta** - Apply damage/healing with bloodied/death tracking
-- ✅ **take_rest** - Short/long rest mechanics with hit dice, spell slots
-- ✅ **manage_spell_slots** - D&D 5e spell slot management (full/half/third casters, warlock pact magic)
-
-### Spatial Module (1 tool)
-
-- ✅ **measure_distance** - Grid-based distance calculation (5e rules)
-
----
-
-## Testing
+The web client connects to the SSE endpoint:
 
 ```bash
-# Run all tests
-npm test
+# Start server with SSE
+node dist/index.js --sse
 
-# Run tests once (no watch mode)
-npm test -- --run
-
-# Run with coverage
-npm run test:coverage
+# Open web-client/index.html in browser
 ```
 
-**Current Status:** 599/599 tests passing across 22 test files
+---
+
+## Available Tools
+
+### Character Management
+| Tool | Description |
+|------|-------------|
+| `create_character` | Full D&D 5e character creation with auto-calculated stats |
+| `get_character` | Retrieve by ID/name, supports listing and filtering |
+| `update_character` | Modify stats with before/after comparison |
+| `delete_character` | Remove with cascade cleanup, batch support |
+| `level_up` | Level progression with HP rolls, spell slots |
+| `take_rest` | Short/long rest with hit dice and recovery |
+| `manage_spell_slots` | Full/half/third casters, warlock pact magic |
+| `roll_check` | Skill checks, saves, attacks, initiative |
+
+### Combat System
+| Tool | Description |
+|------|-------------|
+| `create_encounter` | Initialize combat with participants and terrain |
+| `get_encounter` | Retrieve state with verbosity levels |
+| `execute_action` | Attack, dash, dodge, disengage, grapple, shove, cast |
+| `advance_turn` | Turn management with condition ticking |
+| `end_encounter` | Close with outcome tracking |
+| `roll_death_save` | D&D 5e death save mechanics |
+| `manage_condition` | Apply/remove conditions with duration |
+| `manage_encounter` | Composite operations with state sync |
+| `render_battlefield` | ASCII tactical map |
+| `modify_terrain` | Hazards, obstacles, difficult terrain |
+
+### Magic System
+| Tool | Description |
+|------|-------------|
+| `manage_concentration` | Concentration checks and tracking |
+| `manage_aura` | Spirit Guardians, Paladin auras, etc. |
+| `use_scroll` | Spell scroll mechanics |
+| `synthesize_spell` | Improvised magic with Arcana checks |
+
+### Spatial Mechanics
+| Tool | Description |
+|------|-------------|
+| `measure_distance` | Grid-based distance (5e rules) |
+| `calculate_aoe` | Sphere, cone, line, cube, cylinder |
+| `check_line_of_sight` | Obstacle detection |
+| `check_cover` | Half, three-quarters, full cover |
+| `place_prop` | Interactive battlefield objects |
+| `calculate_movement` | Pathfinding with terrain |
+
+### World & Session
+| Tool | Description |
+|------|-------------|
+| `manage_location` | Location graph for navigation |
+| `move_party` | Travel between locations |
+| `manage_party` | Party composition and roles |
+| `manage_inventory` | Item management and equipping |
+| `manage_notes` | Session notes with tagging |
+| `get_session_context` | Comprehensive state snapshot |
+
+### Dice
+| Tool | Description |
+|------|-------------|
+| `roll_dice` | Standard notation, advantage/disadvantage, batch rolls |
 
 ---
 
@@ -112,76 +135,88 @@ npm run test:coverage
 ```
 ChatRPG/
 ├── src/
-│   ├── index.ts           # MCP server entry point
-│   ├── registry.ts        # Tool registration hub
-│   ├── types.ts           # Shared TypeScript types
-│   ├── websocket.ts       # Real-time battlefield broadcasting
+│   ├── index.ts           # MCP server (stdio + SSE transports)
+│   ├── registry.ts        # Tool registration (30+ tools)
+│   ├── types.ts           # Shared Zod schemas
+│   ├── fuzzy-enum.ts      # Fuzzy enum matching
+│   ├── websocket.ts       # Real-time broadcasting
 │   └── modules/
-│       ├── ascii-art.ts   # ASCII output rendering
-│       ├── dice.ts        # Dice rolling engine
-│       ├── characters.ts  # Character CRUD + spell slots
-│       ├── combat.ts      # Encounter management
-│       └── spatial.ts     # Grid mechanics
-├── tests/                 # Vitest test suites (22 files)
-├── data/                  # Runtime JSON storage
-│   └── characters/        # Character persistence
-├── design docs/           # ADRs and design documentation
-└── dist/                  # Compiled output (npm run build)
+│       ├── ascii-art.ts   # Box drawing, formatting
+│       ├── characters.ts  # Character CRUD, leveling
+│       ├── combat.ts      # Encounters, conditions, actions
+│       ├── data.ts        # Locations, party, inventory, notes
+│       ├── dice.ts        # Dice parsing and rolling
+│       ├── magic.ts       # Spells, concentration, auras
+│       └── spatial.ts     # Distance, AoE, movement
+├── web-client/            # Browser-based interface
+├── tests/                 # Vitest test suites
+├── dist/                  # Compiled output
+└── design docs/           # ADRs and documentation
 ```
 
 ---
 
 ## Development
 
-### Watch Mode (Auto-rebuild)
+### Commands
 
 ```bash
+# Development with auto-rebuild
 npm run dev
+
+# Type check
+npx tsc --noEmit
+
+# Build
+npm run build
+
+# Run tests
+npm test
+
+# Run tests once
+npm test -- --run
 ```
 
 ### Adding a New Tool
 
-1. **Define Schema** in `src/modules/[module].ts`
-2. **Write Tests** in `tests/[module]/[tool].test.ts` (TDD: Red phase)
-3. **Implement Handler** (Green phase)
-4. **Register Tool** in `src/registry.ts`
-5. **Verify** with `npm test -- --run`
+1. Define Zod schema in `src/modules/[module].ts`
+2. Write handler function
+3. Export schema from module
+4. Register in `src/registry.ts`
+5. Add tests in `tests/[module]/`
 
 ### Git Workflow
 
-This project acts as a **Lite Gitflow** repository:
-
-- **main**: Stable, production-ready code. Only checked-out for release.
-- **development**: Active development branch. All features merged here first.
+- **main** - Production-ready, auto-deploys to Railway
+- **development** - Active development branch
 
 ---
 
-## Architecture
+## Data Storage
 
-### MCP Protocol
+Character and session data is stored in:
 
-- **Transport:** stdio (standard input/output)
-- **Format:** JSON-RPC 2.0
-- **Capabilities:** Tools only (no resources/prompts yet)
+- **Windows:** `%APPDATA%\rpg-lite-mcp\`
+- **macOS/Linux:** `~/.config/rpg-lite-mcp/`
 
-### Tool Design Principles
-
-1. **Immersive ASCII Art** - All responses use box drawing for a retro-game aesthetic
-2. **Zod Validation** - Every tool has strict input schema validation
-3. **Stateful Persistence** - Characters/encounters saved to `./data/`
-4. **D&D 5e Accurate** - Proficiency bonuses, hit dice, grid mechanics all SRD-compliant
-5. **Terminal-First** - Monospace-optimized, works in any CLI/chat interface
+```
+rpg-lite-mcp/
+├── characters/     # Character JSON files
+├── encounters/     # Active encounter state
+├── locations/      # Location graph
+├── party/          # Party composition
+└── notes/          # Session notes
+```
 
 ---
 
 ## Example Usage
 
-Once registered with Claude Desktop, you can ask:
+Ask Claude:
 
 > "Create a level 5 halfling rogue named Finn with high dexterity"
 
-Claude will call `create_character` and return:
-
+Response:
 ```
 ╔═══════════════════════ CHARACTER SHEET ════════════════════════╗
 ║                             Finn                                ║
@@ -189,113 +224,88 @@ Claude will call `create_character` and return:
 ║                                                                 ║
 ║                   HP: [████████████████] 35/35                  ║
 ║                                                                 ║
-║ ──────────────────────────────────────────────────────────────  ║
+║ ────────────────────────────────────────────────────────────── ║
 ║                                                                 ║
 ║ AC         │ Speed        │ Initiative   │ Prof Bonus          ║
 ║ 15         │ 25 ft        │ +4           │ +3                  ║
-║                                                                 ║
-║ ──────────────────────────────────────────────────────────────  ║
-║                                                                 ║
-║            STR              DEX              CON                ║
-║             10               18               14                ║
-║            (+0)             (+4)             (+2)               ║
-║                                                                 ║
-║            INT              WIS              CHA                ║
-║             12               13               10                ║
-║            (+1)             (+1)             (+0)               ║
-║                                                                 ║
-║ ──────────────────────────────────────────────────────────────  ║
-║                                                                 ║
-║ Character ID: a7f3e8d1-4c2b-9f3a-8d6e-1b2c3d4e5f6g             ║
-║ Created: 2025-12-17 18:45:00                                   ║
-║ ╚════════════════════════════════════════════════════════════════╝
+╚════════════════════════════════════════════════════════════════╝
 ```
 
-Try other commands:
-
-- "Roll 2d6+3 for damage"
-- "Measure distance from (0,0) to (5,8)"
-- "Add the blinded condition to goblin-1 for 3 rounds"
+Other commands:
+- "Roll 4d6 drop lowest for ability scores"
+- "Start a combat encounter with 3 goblins"
+- "Cast fireball centered at position 5,5"
+- "Move the party to the tavern"
 
 ---
 
-## Roadmap
+## Deployment
 
-### Tier 1: Foundation (In Progress)
+The server is deployed on Railway and auto-deploys from the `main` branch.
 
-- [x] roll_dice
-- [x] create_character, get_character, update_character
-- [x] manage_condition
-- [x] measure_distance
-- [ ] list_characters
-- [x] create_encounter, execute_action(Phases 1-2), apply_damage(merged)
-
-### Tier 2: Combat Support
-
-- [ ] advance_turn, render_battlefield
-- [x] roll_check
-- [ ] resolve_attack (merged into execute_action)
-- [ ] roll_death_save
-
-### Tier 3: Advanced Features
-
-- [ ] Magic system (spell slots, concentration)
-- [ ] Spatial mechanics (AoE, line of sight, cover)
-- [ ] Session management (notes, locations, party)
-
-See [TOOLS_CHECKLIST.md](TOOLS_CHECKLIST.md) for full implementation status.
+**SSE Endpoint:** `https://chatrpg-production.up.railway.app/`
 
 ---
 
 ## Troubleshooting
 
-### Server Won't Start in Claude Desktop
-
-1. **Check the path** in `claude_desktop_config.json` is absolute and correct
-2. **Verify build** with `npm run build`
-3. **Test manually** with `node dist/index.js` (should print "RPG-Lite MCP Server running on stdio")
-4. **Check Claude logs** (usually in `%APPDATA%\Claude\logs` on Windows)
+### Server Won't Start
+1. Verify build: `npm run build`
+2. Check path in config is absolute
+3. Test manually: `node dist/index.js`
 
 ### Tool Calls Failing
+1. Rebuild: `npm run build`
+2. Run tests: `npm test -- --run`
+3. Check TypeScript: `npx tsc --noEmit`
 
-1. **Rebuild** with `npm run build`
-2. **Check test suite** with `npm test -- --run`
-3. **Verify data directory** exists: `mkdir -p data/characters`
+### Encoding Issues
+If ASCII art displays as garbled text (e.g., `Ã¢â€â‚¬` instead of `─`), ensure:
+- Source files are UTF-8 encoded
+- Terminal/client supports Unicode
+- No double-encoding in transport layer
+
+---
+
+## Architecture
+
+### MCP Protocol
+- **Transports:** stdio, SSE (Server-Sent Events)
+- **Format:** JSON-RPC 2.0
+- **Capabilities:** Tools (30+)
+
+### Design Principles
+1. **ASCII Art First** - All output uses box drawing for terminal aesthetics
+2. **Zod Validation** - Strict input schemas with fuzzy enum matching
+3. **Stateful Persistence** - JSON files in AppData
+4. **D&D 5e Accurate** - SRD-compliant mechanics
+5. **Real-time Updates** - WebSocket broadcasting for encounters
 
 ---
 
 ## Contributing
 
-This project follows **strict TDD protocol**:
+This project follows TDD:
+1. Write failing tests
+2. Implement minimal code to pass
+3. Refactor
 
-1. Red: Write failing tests first
-2. Green: Implement minimal code to pass
-3. Refactor: Clean up and optimize
-
-All PRs must:
-
-- Include tests for new functionality
-- Maintain 100% test pass rate
-- Pass TypeScript strict mode compilation
-- Follow existing code structure
+PRs must:
+- Include tests
+- Pass TypeScript strict mode
+- Follow existing patterns
 
 ---
 
 ## License
 
-Proprietary - See [LICENSE](LICENSE) for details. Personal, non-commercial use permitted.
+Proprietary - Personal, non-commercial use permitted. See [LICENSE](LICENSE).
 
 ---
 
 ## Credits
 
-Built with:
-
 - [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/sdk) - MCP TypeScript SDK
 - [Zod](https://zod.dev) - Schema validation
 - [Vitest](https://vitest.dev) - Testing framework
 - D&D 5e SRD (System Reference Document)
-
----
-
-**Status:** Alpha - 9/50 tools operational | TDD-driven development | 250/250 tests passing

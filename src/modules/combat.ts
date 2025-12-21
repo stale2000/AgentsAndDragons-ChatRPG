@@ -3731,18 +3731,18 @@ export type LegendDetailLevel = 'minimal' | 'standard' | 'detailed';
 
 /** Symbols for terrain features */
 const TERRAIN_SYMBOLS = {
-  floor: 'Ã‚Â·',
-  wall: '█',
-  difficultTerrain: '░',
-  water: '≈',
+  floor: '.',
+  wall: '#',
+  difficultTerrain: '~',
+  water: '=',
   hazard: '*',
 } as const;
 
 /** Symbols for entity states */
 const ENTITY_STATE_SYMBOLS = {
-  dead: '†',
-  unconscious: '○',
-  currentTurn: '▶',
+  dead: 'X',
+  unconscious: 'o',
+  currentTurn: '>',
 } as const;
 
 /** Width of the battlefield display header/dividers */
@@ -4212,9 +4212,9 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
   const lines: string[] = [];
   
   // Header
-  lines.push('•'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
+  lines.push('='.repeat(BATTLEFIELD_DISPLAY_WIDTH));
   lines.push(`                    BATTLEFIELD - Round ${round}`);
-  lines.push('•'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
+  lines.push('='.repeat(BATTLEFIELD_DISPLAY_WIDTH));
   lines.push('');
   
   // Coordinate headers (x-axis)
@@ -4225,8 +4225,8 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
   // Grid rows with y-axis coordinates
   for (let i = 0; i < grid.length; i++) {
     const y = viewportBounds.y + i;
-    const prefix = showCoordinates ? `${y.toString().padStart(2)} └` : '└';
-    lines.push(`${prefix}${grid[i].join('└')}└`);
+    const prefix = showCoordinates ? `${y.toString().padStart(2)} |` : '|';
+    lines.push(`${prefix}${grid[i].join('|')}|`);
   }
   lines.push('');
   
@@ -4235,7 +4235,7 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
   
   // Entity legend
   if (showLegend) {
-    lines.push('─'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
+    lines.push('-'.repeat(BATTLEFIELD_DISPLAY_WIDTH));
     lines.push('COMBATANTS:');
     lines.push('');
     
@@ -4259,7 +4259,7 @@ export function renderBattlefield(input: RenderBattlefieldInput): string {
     // Elevation explanation
     if (showElevation && hasMultipleElevations) {
       lines.push('');
-      lines.push('ELEVATION: z=N means NÃƒâ€”5ft above ground (z<0 = below ground)');
+      lines.push('ELEVATION: z=N means Nx5ft above ground (z<0 = below ground)');
     }
   }
   
