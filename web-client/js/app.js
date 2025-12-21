@@ -737,8 +737,8 @@ You are the DM. Don't explain - PLAY.`;
 
         if (role === 'system') {
             // System/Tool messages are pre-formatted HTML
-            // Apply encoding repair to fix garbled Unicode from OpenAI API
-            contentDiv.innerHTML = this.repairEncoding(content);
+            // Direct tool calls return clean UTF-8, no repair needed
+            contentDiv.innerHTML = content;
         } else if (typeof content === 'string') {
             // Parse markdown-like formatting for standard messages
             // (formatMessage already calls repairEncoding)
