@@ -9,29 +9,90 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 // Re-export SDK type for external use
 export type { CallToolResult };
 
-// Tool Definition Interface
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: {
-    type?: 'object';
-    properties?: Record<string, unknown>;
+// ============================================================
+// TYPE DEFINITIONS
+// ============================================================
+
+/**
+ * JSON Schema representation for MCP tool input validation.
+ * Supports standard object schemas and discriminated unions (anyOf/oneOf).
+ */
+export interface JsonSchema {
+  type?: 'object';
+  properties?: Record<string, unknown>;
+  required?: string[];
+  anyOf?: Array<{
+    type: 'object';
+    properties: Record<string, unknown>;
     required?: string[];
-    anyOf?: Array<{
-      type: 'object';
-      properties: Record<string, unknown>;
-      required?: string[];
-    }>;
-    oneOf?: Array<{
-      type: 'object';
-      properties: Record<string, unknown>;
-      required?: string[];
-    }>;
-  };
-  handler: (args: unknown) => Promise<CallToolResult>;
+  }>;
+  oneOf?: Array<{
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+  }>;
 }
 
-// Helper: Format success response
+/**
+ * Generic type for MCP tool handlers.
+ * Provides type safety for validated arguments from Zod schema parsing.
+ *
+ * @template TArgs - The validated argument type from Zod schema (defaults to unknown for untyped handlers)
+ * @example
+ * ```typescript
+ * // Typed handler with inferred args from Zod schema
+ * const handler: ToolHandler<z.infer<typeof mySchema>> = async (args) => {
+ *   // args is fully typed here
+ *   return success(args.name);
+ * };
+ * ```
+ */
+export type ToolHandler<TArgs = unknown> = (args: TArgs) => Promise<CallToolResult>;
+
+/**
+ * Complete tool definition with typed handler.
+ * Combines tool metadata (name, description, schema) with an optionally typed handler.
+ *
+ * @template TArgs - The expected argument type for the handler (defaults to unknown)
+ * @example
+ * ```typescript
+ * const myTool: TypedToolDefinition<{ name: string }> = {
+ *   name: 'my_tool',
+ *   description: 'Does something with a name',
+ *   inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+ *   handler: async (args) => success(`Hello ${args.name}`)
+ * };
+ * ```
+ */
+export interface TypedToolDefinition<TArgs = unknown> {
+  /** Unique tool identifier (snake_case by convention) */
+  name: string;
+  /** Human-readable description for LLM tool discovery */
+  description: string;
+  /** JSON Schema for input validation */
+  inputSchema: JsonSchema;
+  /** Async handler function that processes validated arguments */
+  handler: ToolHandler<TArgs>;
+}
+
+/**
+ * Tool definition interface for the registry.
+ * Uses unknown args type since handlers receive unvalidated input from MCP.
+ * Validation happens inside each handler via Zod parsing.
+ */
+export interface ToolDefinition extends TypedToolDefinition<unknown> {}
+
+// ============================================================
+// RESPONSE HELPERS
+// ============================================================
+
+/**
+ * Format a successful tool response with Markdown content.
+ * Logs output for debugging encoding issues in MCP transport.
+ *
+ * @param markdown - The Markdown-formatted response content
+ * @returns MCP CallToolResult with text content
+ */
 export function success(markdown: string): CallToolResult {
   // Log raw output for debugging encoding issues
   console.error('[MCP RAW OUTPUT]', markdown.substring(0, 500));
@@ -44,7 +105,12 @@ export function success(markdown: string): CallToolResult {
   };
 }
 
-// Helper: Format error response
+/**
+ * Format an error response with standardized prefix.
+ *
+ * @param message - The error message to return
+ * @returns MCP CallToolResult with isError flag set
+ */
 export function error(message: string): CallToolResult {
   return {
     content: [{ type: 'text', text: `[ERROR] ${message}` }],
@@ -56,27 +122,42 @@ export function error(message: string): CallToolResult {
 // TOOL CALL TRACKING
 // ============================================================
 
-// Call counter for each tool
+/** Internal counter for tool invocations (keyed by tool name) */
 const toolCallCounts: Record<string, number> = {};
 
-// Get call count for a specific tool
+/**
+ * Get the number of times a specific tool has been called.
+ *
+ * @param name - The tool name to query
+ * @returns The call count (0 if never called)
+ */
 export function getToolCallCount(name: string): number {
   return toolCallCounts[name] || 0;
 }
 
-// Get all call counts
+/**
+ * Get all tool call counts as a snapshot.
+ *
+ * @returns Copy of the call count record
+ */
 export function getAllToolCallCounts(): Record<string, number> {
   return { ...toolCallCounts };
 }
 
-// Reset all counts (useful for testing)
+/**
+ * Reset all tool call counters to zero.
+ * Primarily used for testing isolation.
+ */
 export function resetToolCallCounts(): void {
   for (const key of Object.keys(toolCallCounts)) {
     delete toolCallCounts[key];
   }
 }
 
-// Increment counter (called internally)
+/**
+ * Increment the call counter for a tool.
+ * @internal Called by handleToolCall
+ */
 function trackToolCall(name: string): void {
   toolCallCounts[name] = (toolCallCounts[name] || 0) + 1;
 }
@@ -111,14 +192,22 @@ import { manageLocation, manageLocationSchema, moveParty, movePartySchema, manag
 import { createBox, BOX } from './modules/ascii-art.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
-// Helper to convert Zod schema to JSON Schema without $ref (Claude MCP client doesn't resolve refs)
-// MCP requires type: "object" at root, so we flatten union schemas
-function toJsonSchema(schema: z.ZodTypeAny) {
-  const jsonSchema = zodToJsonSchema(schema, { $refStrategy: 'none' }) as any;
+/**
+ * Convert a Zod schema to JSON Schema for MCP tool registration.
+ *
+ * MCP/Claude client doesn't resolve $ref, so we use 'none' strategy.
+ * Union schemas (anyOf/oneOf) are flattened to a single object with
+ * all properties merged, since MCP requires type: "object" at root.
+ *
+ * @param schema - The Zod schema to convert
+ * @returns JSON Schema compatible with MCP tool definition
+ */
+function toJsonSchema(schema: z.ZodTypeAny): JsonSchema {
+  const jsonSchema = zodToJsonSchema(schema, { $refStrategy: 'none' }) as Record<string, unknown>;
 
   // If schema has anyOf/oneOf at root, flatten it to a single object with all properties optional
   if (jsonSchema.anyOf || jsonSchema.oneOf) {
-    const variants = jsonSchema.anyOf || jsonSchema.oneOf;
+    const variants = (jsonSchema.anyOf || jsonSchema.oneOf) as Array<{ properties?: Record<string, unknown> }>;
     const allProperties: Record<string, unknown> = {};
 
     // Merge all properties from all variants
@@ -131,18 +220,10 @@ function toJsonSchema(schema: z.ZodTypeAny) {
     return {
       type: 'object',
       properties: allProperties,
-    } as {
-      type: 'object';
-      properties: Record<string, unknown>;
-      required?: string[];
     };
   }
 
-  return jsonSchema as {
-    type: 'object';
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
+  return jsonSchema as JsonSchema;
 }
 
 export const toolRegistry: Record<string, ToolDefinition> = {
@@ -1039,6 +1120,24 @@ export const toolRegistry: Record<string, ToolDefinition> = {
 // TOOL CALL HANDLER
 // ============================================================
 
+/**
+ * Execute a tool by name with the provided arguments.
+ *
+ * This is the main entry point for MCP tool invocations.
+ * It handles:
+ * - Tool lookup from the registry
+ * - Call tracking for analytics
+ * - Error handling and formatting
+ *
+ * @param name - The tool name (must exist in toolRegistry)
+ * @param args - The unvalidated arguments from the MCP client
+ * @returns MCP CallToolResult with success or error content
+ *
+ * @example
+ * ```typescript
+ * const result = await handleToolCall('roll_dice', { expression: '2d6+4' });
+ * ```
+ */
 export async function handleToolCall(
   name: string,
   args: unknown
