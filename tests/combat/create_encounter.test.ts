@@ -349,7 +349,7 @@ describe('create_encounter', () => {
       expect(text).toMatch(/battlefield|terrain/i);
     });
 
-    it('should default terrain to 20x20 when not provided', async () => {
+    it('should default terrain to 50x50 when not provided', async () => {
       const result = await handleToolCall('create_encounter', {
         participants: [
           { id: 'p1', name: 'Cleric', hp: 27, maxHp: 27, position: { x: 10, y: 10 } },
@@ -357,7 +357,7 @@ describe('create_encounter', () => {
       });
 
       const text = getTextContent(result);
-      expect(text).toContain('20'); // Default dimensions
+      expect(text).toContain('50'); // Default dimensions (larger for tactical combat)
     });
 
     it('should recognize obstacles at specified positions', async () => {
@@ -436,7 +436,7 @@ describe('create_encounter', () => {
     it('should validate terrain dimensions (min 5, max 100)', async () => {
       const result = await handleToolCall('create_encounter', {
         participants: [
-          { id: 'p1', name: 'Wizard', hp: 20, maxHp: 20, position: { x: 50, y: 50 } },
+          { id: 'p1', name: 'Wizard', hp: 20, maxHp: 20, position: { x: 50, y: 2 } },
         ],
         terrain: {
           width: 100,
@@ -532,7 +532,7 @@ describe('create_encounter', () => {
           name: `Creature ${i}`,
           hp: 20,
           maxHp: 20,
-          position: { x: i * 2, y: i * 2 },
+          position: { x: i, y: i },  // Use smaller positions to fit in 20x20 grid
           isEnemy: i > 6,
         });
       }
@@ -579,6 +579,31 @@ describe('create_encounter', () => {
       });
 
       expect(result.isError).toBe(true);
+    });
+
+    it('should reject participant positions outside terrain bounds', async () => {
+      const result = await handleToolCall('create_encounter', {
+        participants: [
+          { id: 'p1', name: 'Fighter', hp: 30, maxHp: 30, position: { x: 40, y: 0 } },
+        ],
+        terrain: { width: 20, height: 20 },
+      });
+
+      expect(result.isError).toBe(true);
+      const text = getTextContent(result);
+      expect(text).toMatch(/out of bounds/i);
+    });
+
+    it('should reject negative position coordinates', async () => {
+      const result = await handleToolCall('create_encounter', {
+        participants: [
+          { id: 'p1', name: 'Fighter', hp: 30, maxHp: 30, position: { x: -5, y: 0 } },
+        ],
+      });
+
+      expect(result.isError).toBe(true);
+      const text = getTextContent(result);
+      expect(text).toMatch(/out of bounds/i);
     });
 
     it('should handle seed for deterministic rolls (optional)', async () => {

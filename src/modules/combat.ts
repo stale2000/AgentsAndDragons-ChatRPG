@@ -1052,10 +1052,10 @@ const ParticipantInputSchema = z.union([
  */
 const ParticipantSchema = ManualParticipantSchema;
 
-// Terrain Schema
+// Terrain Schema - default 50x50 for larger tactical combat maps
 const TerrainSchema = z.object({
-  width: z.number().min(5).max(100).default(20),
-  height: z.number().min(5).max(100).default(20),
+  width: z.number().min(5).max(100).default(50),
+  height: z.number().min(5).max(100).default(50),
   obstacles: z.array(z.string()).optional(),
   difficultTerrain: z.array(z.string()).optional(),
   water: z.array(z.string()).optional(),
@@ -1321,8 +1321,19 @@ export function createEncounter(input: CreateEncounterInput): string {
   const encounterId = randomUUID();
 
   // Terrain and lighting already have defaults applied by parse
-  const terrain = parsed.terrain || { width: 20, height: 20 };
+  const terrain = parsed.terrain || { width: 50, height: 50 };
   const lighting = parsed.lighting;
+
+  // Validate participant positions are within terrain bounds
+  for (const p of resolvedParticipants) {
+    const pos = p.position;
+    if (pos.x < 0 || pos.x >= terrain.width || pos.y < 0 || pos.y >= terrain.height) {
+      throw new Error(
+        `Participant "${p.name}" position (${pos.x}, ${pos.y}) is out of bounds. ` +
+        `Grid size is ${terrain.width}x${terrain.height} (valid: 0-${terrain.width - 1}, 0-${terrain.height - 1})`
+      );
+    }
+  }
 
   // Roll initiative for all participants
   const participantsWithInitiative = resolvedParticipants.map(p => {
@@ -4396,16 +4407,16 @@ export function modifyTerrain(input: ModifyTerrainInput): string {
 
   // 5. Ensure terrain object exists with all fields
   if (!encounter.terrain) {
-    encounter.terrain = { width: 20, height: 20 };
+    encounter.terrain = { width: 50, height: 50 };
   }
   const terrain = encounter.terrain;
   if (!terrain.obstacles) terrain.obstacles = [];
   if (!terrain.difficultTerrain) terrain.difficultTerrain = [];
   if (!terrain.water) terrain.water = [];
   if (!terrain.hazards) terrain.hazards = [];
-  
-  const gridWidth = terrain.width || 20;
-  const gridHeight = terrain.height || 20;
+
+  const gridWidth = terrain.width || 50;
+  const gridHeight = terrain.height || 50;
 
   // 5b. Validate positions are within bounds (for add operation)
   if (input.operation === 'add' && input.positions) {

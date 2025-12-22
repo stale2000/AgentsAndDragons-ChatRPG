@@ -33,6 +33,41 @@ import * as os from 'os';
 import { calculateEffectiveStats, getActiveConditions, manageCondition } from './combat.js';
 import { parseDice } from './dice.js';
 
+// ============================================================
+// CHARACTER SYSTEM CONSTANTS
+// ============================================================
+
+/**
+ * Character system limits and constants for D&D 5e.
+ *
+ * Consolidates all magic numbers for character validation and mechanics.
+ * These values match official D&D 5e rules from the Player's Handbook.
+ *
+ * @example
+ * // Validate level range
+ * if (level > CHARACTER_LIMITS.MAX_LEVEL) throw new Error('Level too high');
+ *
+ * @example
+ * // Clamp ability score
+ * const clamped = Math.min(CHARACTER_LIMITS.MAX_ABILITY_SCORE, score);
+ */
+export const CHARACTER_LIMITS = {
+  /** Maximum character level (D&D 5e cap, PHB p.15) */
+  MAX_LEVEL: 20,
+  /** Minimum character level */
+  MIN_LEVEL: 1,
+  /** Maximum ability score (D&D 5e cap for deities/legendary creatures) */
+  MAX_ABILITY_SCORE: 30,
+  /** Minimum ability score */
+  MIN_ABILITY_SCORE: 1,
+  /** Maximum batch size for multi-character operations */
+  MAX_BATCH_SIZE: 20,
+  /** Minimum HP gained per level (D&D 5e rule: always at least 1) */
+  MIN_HP_PER_LEVEL: 1,
+  /** Default HP calculation method for level-ups */
+  DEFAULT_HP_METHOD: 'average' as const,
+} as const;
+
 // Use AppData for persistent character storage (cross-session persistence)
 const getDataDir = () => {
   if (process.platform === 'win32') {
@@ -366,19 +401,6 @@ export const manageSpellSlotsSchema = z.union([
 export type ManageSpellSlotsInput = z.infer<typeof singleSpellSlotSchema>;
 
 // ============================================================
-// LEVEL UP CONSTANTS
-// ============================================================
-
-/** Maximum character level (D&D 5e cap) */
-const MAX_CHARACTER_LEVEL = 20;
-
-/** Minimum HP gained per level (D&D 5e rule: always at least 1) */
-const MIN_HP_PER_LEVEL = 1;
-
-/** Default HP calculation method */
-const DEFAULT_HP_METHOD = 'average' as const;
-
-// ============================================================
 // LEVEL UP SCHEMA
 // ============================================================
 
@@ -513,12 +535,6 @@ export interface Character {
 // HELPER FUNCTIONS
 // ============================================================
 
-/** Minimum valid ability score (D&D 5e/generic RPG) */
-const MIN_ABILITY_SCORE = 1;
-
-/** Maximum valid ability score (D&D 5e allows 30 for deities/legendary) */
-const MAX_ABILITY_SCORE = 30;
-
 /**
  * Default hit die by class (D&D 5e standard).
  * Custom classes can override via customClass.hitDie.
@@ -579,10 +595,10 @@ function calculateProficiencyBonus(level: number): number {
 /**
  * Clamp ability score to valid range.
  * @param score - Raw ability score
- * @returns Clamped score between MIN_ABILITY_SCORE and MAX_ABILITY_SCORE
+ * @returns Clamped score between CHARACTER_LIMITS.MIN_ABILITY_SCORE and CHARACTER_LIMITS.MAX_ABILITY_SCORE
  */
 function clampAbilityScore(score: number): number {
-  return Math.min(MAX_ABILITY_SCORE, Math.max(MIN_ABILITY_SCORE, score));
+  return Math.min(CHARACTER_LIMITS.MAX_ABILITY_SCORE, Math.max(CHARACTER_LIMITS.MIN_ABILITY_SCORE, score));
 }
 
 /**
@@ -4588,8 +4604,8 @@ function levelUpSingle(input: LevelUpInput): {
   const targetLevel = input.targetLevel ?? oldLevel + 1;
 
   // Validation: enforce level cap
-  if (targetLevel > MAX_CHARACTER_LEVEL) {
-    return { success: false, error: `Cannot level up past ${MAX_CHARACTER_LEVEL} (target: ${targetLevel})` };
+  if (targetLevel > CHARACTER_LIMITS.MAX_LEVEL) {
+    return { success: false, error: `Cannot level up past ${CHARACTER_LIMITS.MAX_LEVEL} (target: ${targetLevel})` };
   }
 
   if (targetLevel <= oldLevel) {
