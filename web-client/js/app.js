@@ -166,7 +166,7 @@ class ChatApp {
             this.updateStatus('connected', 'Ready');
 
         } catch (error) {
-            console.error('Error calling OpenAI:', error);
+            console.error('Error calling API:', error);
             this.showError(`Failed to get response: ${error.message}`);
             this.updateStatus('error', 'Error');
         } finally {
@@ -555,7 +555,7 @@ You are the DM. Don't explain - PLAY.`;
                 'X-Title': 'ChatRPG'
             },
             body: JSON.stringify({
-                model: 'nvidia/nemotron-3-nano-30b-a3b:free',
+                model: 'nvidia/nemotron-3-nano-30b-a3b',
                 messages: messages,
                 stream: true,
                 tools: tools.length > 0 ? tools : undefined
