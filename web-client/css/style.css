@@ -69,6 +69,36 @@ h1 {
   font-size: 0.875rem;
 }
 
+.model-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-secondary);
+  border-radius: 2rem;
+  font-size: 0.875rem;
+}
+
+.model-selector label {
+  color: var(--text-secondary);
+}
+
+.model-selector select {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  outline: none;
+}
+
+.model-selector select:focus {
+  border-color: var(--primary-color);
+}
+
 .status-indicator {
   width: 8px;
   height: 8px;

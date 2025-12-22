@@ -7,6 +7,7 @@ class ChatApp {
     constructor() {
         this.conversationHistory = [];
         this.isProcessing = false;
+        this.currentModel = 'openai'; // Default to OpenAI
 
         // DOM elements
         this.messagesContainer = document.getElementById('messages');
@@ -16,14 +17,20 @@ class ChatApp {
         this.statusText = document.querySelector('.status-text');
         this.typingIndicator = document.getElementById('typing-indicator');
         this.typingText = this.typingIndicator?.querySelector('.typing-text');
+        this.modelSelect = document.getElementById('model-select');
 
         this.init();
     }
 
     init() {
-        // Check config
-        if (!window.CHATRPG_CONFIG || !window.CHATRPG_CONFIG.openaiApiKey) {
-            this.showError('Configuration error: OpenAI API key not set');
+        // Check config - need at least one API key
+        const hasOpenAI = window.CHATRPG_CONFIG?.openaiApiKey &&
+                          !window.CHATRPG_CONFIG.openaiApiKey.includes('{{');
+        const hasOpenRouter = window.CHATRPG_CONFIG?.openrouterApiKey &&
+                              !window.CHATRPG_CONFIG.openrouterApiKey.includes('{{');
+
+        if (!hasOpenAI && !hasOpenRouter) {
+            this.showError('Configuration error: No API keys configured');
             this.updateStatus('error', 'Not configured');
             return;
         }
@@ -32,6 +39,27 @@ class ChatApp {
             this.showError('Configuration error: MCP server URL not set');
             this.updateStatus('error', 'Not configured');
             return;
+        }
+
+        // Disable unavailable model options
+        if (this.modelSelect) {
+            const openaiOption = this.modelSelect.querySelector('option[value="openai"]');
+            const openrouterOption = this.modelSelect.querySelector('option[value="openrouter"]');
+
+            if (!hasOpenAI && openaiOption) {
+                openaiOption.disabled = true;
+                openaiOption.textContent += ' (not configured)';
+            }
+            if (!hasOpenRouter && openrouterOption) {
+                openrouterOption.disabled = true;
+                openrouterOption.textContent += ' (not configured)';
+            }
+
+            // Set default to first available model
+            if (!hasOpenAI && hasOpenRouter) {
+                this.modelSelect.value = 'openrouter';
+                this.currentModel = 'openrouter';
+            }
         }
 
         // Set up event listeners
@@ -59,6 +87,14 @@ class ChatApp {
             this.userInput.style.height = 'auto';
             this.userInput.style.height = Math.min(this.userInput.scrollHeight, 150) + 'px';
         });
+
+        // Model selector
+        if (this.modelSelect) {
+            this.modelSelect.addEventListener('change', (e) => {
+                this.currentModel = e.target.value;
+                console.log('🔄 Switched to model:', this.currentModel);
+            });
+        }
     }
 
     updateStatus(status, text) {
@@ -87,8 +123,10 @@ class ChatApp {
         this.updateStatus('connecting', 'Thinking...');
 
         try {
-            // Call OpenAI API with ChatRPG as remote MCP server (streaming)
-            const response = await this.callOpenAI(message);
+            // Call the selected model's API with ChatRPG as remote MCP server (streaming)
+            const response = this.currentModel === 'openrouter'
+                ? await this.callOpenRouter(message)
+                : await this.callOpenAI(message);
 
             // Handle response - text may have been streamed to UI already
             if (response) {
@@ -435,6 +473,254 @@ You are the DM. Don't explain - PLAY.`;
         }
 
         console.log('📝 Extracted items:', responseItems.length, responseItems.map(i => ({type: i.type, role: i.role, hasContent: !!i.content, alreadyRendered: i._alreadyRendered})));
+        return responseItems;
+    }
+
+    /**
+     * Call OpenRouter API with the deepinfra/fp4 model
+     * OpenRouter uses a different API format (OpenAI Chat Completions compatible)
+     * Note: OpenRouter doesn't support MCP directly, so we handle tools manually
+     */
+    async callOpenRouter(userMessage) {
+        // System prompt (same as OpenAI)
+        const systemPrompt = `You are a Dungeon Master running a D&D 5e campaign. The user is the PLAYER.
+
+## CRITICAL: Always Use Tools
+You MUST use ChatRPG tools for ALL game mechanics. Never describe what tools can do - just USE them.
+- Player asks to attack? -> Call execute_action immediately
+- Player wants to create a character? -> Call create_character immediately
+- Player wants to check something? -> Call roll_check immediately
+- Starting a fight? -> Call create_encounter immediately
+
+DO NOT list available tools or explain capabilities. Just take action.
+
+## Response Pattern
+1. Brief narrative setup (1-2 sentences max)
+2. CALL THE TOOL - this is mandatory
+3. Narrate the result dramatically
+
+## Example
+Player: "I attack the goblin with my sword"
+You: "You raise your blade, firelight glinting off the steel—" [call execute_action] "—and bring it crashing down! The goblin shrieks as your sword bites deep, green blood spraying across the stone floor. It staggers back, clutching the wound."
+
+## Combat Style
+- Visceral, cinematic descriptions
+- Build tension as HP drops
+- Track battlefield position verbally
+- Make crits feel EPIC, misses feel tense
+
+## Non-Combat
+- NPCs have distinct voices
+- Environments use all senses
+- Choices have consequences
+- Reward creativity
+
+You are the DM. Don't explain - PLAY.`;
+
+        // Build messages array for OpenRouter (Chat Completions format)
+        const messages = [
+            { role: 'system', content: systemPrompt }
+        ];
+
+        // Add conversation history
+        for (const msg of this.conversationHistory.slice(-6)) {
+            messages.push({
+                role: msg.role === 'user' ? 'user' : 'assistant',
+                content: msg.content
+            });
+        }
+
+        // Fetch available tools from MCP server
+        let tools = [];
+        try {
+            const toolsResponse = await this.fetchMcpTools();
+            tools = toolsResponse.map(tool => ({
+                type: 'function',
+                function: {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.inputSchema || { type: 'object', properties: {} }
+                }
+            }));
+        } catch (e) {
+            console.warn('Failed to fetch MCP tools:', e);
+        }
+
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${window.CHATRPG_CONFIG.openrouterApiKey}`,
+                'HTTP-Referer': window.location.origin,
+                'X-Title': 'ChatRPG'
+            },
+            body: JSON.stringify({
+                model: 'deepinfra/fp4',
+                messages: messages,
+                stream: true,
+                tools: tools.length > 0 ? tools : undefined
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error?.message || 'OpenRouter API request failed');
+        }
+
+        // Handle streaming response and tool calls
+        return await this.handleOpenRouterStream(response, tools);
+    }
+
+    /**
+     * Fetch available tools from the MCP server
+     */
+    async fetchMcpTools() {
+        const mcpUrl = window.CHATRPG_CONFIG.mcpServerUrl;
+        const baseUrl = mcpUrl.replace(/\/sse$/, '');
+        const toolsUrl = `${baseUrl}/tools`;
+
+        const response = await fetch(toolsUrl);
+        if (!response.ok) {
+            throw new Error('Failed to fetch MCP tools');
+        }
+
+        const data = await response.json();
+        return data.tools || [];
+    }
+
+    /**
+     * Handle OpenRouter streaming response with tool call support
+     */
+    async handleOpenRouterStream(response, availableTools) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let currentTextContent = '';
+        let toolCalls = [];
+        let currentToolCall = null;
+
+        // Create streaming message element
+        let streamingMessageDiv = null;
+        let streamingContentDiv = null;
+
+        const responseItems = [];
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const eventData = line.slice(6);
+                    if (eventData === '[DONE]') continue;
+
+                    try {
+                        const event = JSON.parse(eventData);
+                        const delta = event.choices?.[0]?.delta;
+
+                        if (delta?.content) {
+                            currentTextContent += delta.content;
+
+                            // Create or update streaming message
+                            if (!streamingMessageDiv) {
+                                streamingMessageDiv = document.createElement('div');
+                                streamingMessageDiv.className = 'message assistant streaming';
+                                streamingMessageDiv.dataset.timestamp = Date.now();
+                                streamingContentDiv = document.createElement('div');
+                                streamingContentDiv.className = 'message-content';
+                                streamingMessageDiv.appendChild(streamingContentDiv);
+                                this.messagesContainer.appendChild(streamingMessageDiv);
+                            }
+
+                            streamingContentDiv.innerHTML = this.formatMessage(currentTextContent) + '<span class="streaming-cursor">▌</span>';
+                            this.scrollToBottom();
+                        }
+
+                        // Handle tool calls
+                        if (delta?.tool_calls) {
+                            for (const tc of delta.tool_calls) {
+                                if (tc.index !== undefined) {
+                                    if (!toolCalls[tc.index]) {
+                                        toolCalls[tc.index] = {
+                                            id: tc.id || `call_${tc.index}`,
+                                            name: '',
+                                            arguments: ''
+                                        };
+                                    }
+                                    if (tc.function?.name) {
+                                        toolCalls[tc.index].name = tc.function.name;
+                                        this.updateTypingIndicator(`Calling ${tc.function.name}...`);
+                                    }
+                                    if (tc.function?.arguments) {
+                                        toolCalls[tc.index].arguments += tc.function.arguments;
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse SSE event:', e);
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
+
+        // Finalize streaming message
+        if (streamingMessageDiv) {
+            streamingMessageDiv.classList.remove('streaming');
+            if (streamingContentDiv) {
+                streamingContentDiv.innerHTML = this.formatMessage(currentTextContent);
+            }
+        }
+
+        // Execute tool calls and add results
+        for (const tc of toolCalls) {
+            if (!tc || !tc.name) continue;
+
+            try {
+                const args = JSON.parse(tc.arguments || '{}');
+                const result = await this.callToolDirect(tc.name, args);
+
+                const icon = result ? '✅' : '❌';
+                let content = `**${icon} Tool:** \`${tc.name}\``;
+
+                content += `
+<details>
+  <summary>📥 Inputs</summary>
+  <pre><code class="language-json">${JSON.stringify(args, null, 2)}</code></pre>
+</details>`;
+
+                if (result) {
+                    content += `
+<pre class="tool-output-display"><code>${result}</code></pre>`;
+                }
+
+                responseItems.push({
+                    type: 'tool',
+                    role: 'system',
+                    content: content
+                });
+            } catch (e) {
+                console.error('Tool call failed:', tc.name, e);
+            }
+        }
+
+        // Add text response if present (mark as already rendered if streamed)
+        if (currentTextContent) {
+            responseItems.push({
+                type: 'text',
+                role: 'assistant',
+                content: currentTextContent,
+                _alreadyRendered: !!streamingMessageDiv
+            });
+        }
+
         return responseItems;
     }
 
