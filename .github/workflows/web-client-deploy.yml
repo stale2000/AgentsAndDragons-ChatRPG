@@ -31,14 +31,17 @@ jobs:
         env:
           MCP_SERVER_URL: ${{ secrets.MCP_SERVER_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           cd web-client
           # Replace placeholders in index.html
           sed -i "s|{{MCP_SERVER_URL}}|$MCP_SERVER_URL|g" index.html
           sed -i "s|{{OPENAI_API_KEY}}|$OPENAI_API_KEY|g" index.html
+          sed -i "s|{{OPENROUTER_API_KEY}}|$OPENROUTER_API_KEY|g" index.html
           echo "Configuration injected successfully"
           echo "MCP Server URL: ${MCP_SERVER_URL}"
           echo "OpenAI API Key: ***REDACTED***"
+          echo "OpenRouter API Key: ***REDACTED***"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
