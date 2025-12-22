@@ -555,10 +555,14 @@ You are the DM. Don't explain - PLAY.`;
                 'X-Title': 'ChatRPG'
             },
             body: JSON.stringify({
-                model: 'google/gemini-2.0-flash-001',
+                model: 'openai/gpt-oss-120b',
                 messages: messages,
                 stream: true,
-                tools: tools.length > 0 ? tools : undefined
+                tools: tools.length > 0 ? tools : undefined,
+                provider: {
+                    // Require a provider that supports tool use
+                    require_parameters: true
+                }
             })
         });
 
