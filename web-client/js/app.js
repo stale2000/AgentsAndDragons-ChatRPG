@@ -150,7 +150,8 @@ class ChatApp {
                         } else {
                             console.log(`🎨 RENDERING item ${idx} with role=${item.role}:`, item.content?.substring(0, 100));
                             this.addMessage(item.role || 'assistant', item.content);
-                            if (item.type === 'text') {
+                            // Add both text and tool results to history so model has context
+                            if (item.type === 'text' || item.type === 'tool') {
                                 this.conversationHistory.push({
                                     role: 'assistant',
                                     content: item.content
