@@ -44,21 +44,23 @@ class ChatApp {
         // Disable unavailable model options
         if (this.modelSelect) {
             const openaiOption = this.modelSelect.querySelector('option[value="openai"]');
-            const openrouterOption = this.modelSelect.querySelector('option[value="openrouter"]');
+            const openrouterOptions = this.modelSelect.querySelectorAll('option[value^="openrouter-"]');
 
             if (!hasOpenAI && openaiOption) {
                 openaiOption.disabled = true;
                 openaiOption.textContent += ' (not configured)';
             }
-            if (!hasOpenRouter && openrouterOption) {
-                openrouterOption.disabled = true;
-                openrouterOption.textContent += ' (not configured)';
+            if (!hasOpenRouter) {
+                openrouterOptions.forEach(opt => {
+                    opt.disabled = true;
+                    opt.textContent += ' (not configured)';
+                });
             }
 
             // Set default to first available model
             if (!hasOpenAI && hasOpenRouter) {
-                this.modelSelect.value = 'openrouter';
-                this.currentModel = 'openrouter';
+                this.modelSelect.value = 'openrouter-oss';
+                this.currentModel = 'openrouter-oss';
             }
         }
 
@@ -124,9 +126,12 @@ class ChatApp {
 
         try {
             // Call the selected model's API with ChatRPG as remote MCP server (streaming)
-            const response = this.currentModel === 'openrouter'
-                ? await this.callOpenRouter(message)
-                : await this.callOpenAI(message);
+            let response;
+            if (this.currentModel.startsWith('openrouter-')) {
+                response = await this.callOpenRouter(message);
+            } else {
+                response = await this.callOpenAI(message);
+            }
 
             // Handle response - text may have been streamed to UI already
             if (response) {
@@ -546,6 +551,13 @@ You are the DM. Don't explain - PLAY.`;
             console.warn('Failed to fetch MCP tools:', e);
         }
 
+        // Select model based on dropdown choice
+        const modelMap = {
+            'openrouter-oss': 'openai/gpt-oss-120b',
+            'openrouter-nemotron': 'nvidia/nemotron-3-nano-30b-a3b'
+        };
+        const selectedModel = modelMap[this.currentModel] || 'openai/gpt-oss-120b';
+
         const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -555,7 +567,7 @@ You are the DM. Don't explain - PLAY.`;
                 'X-Title': 'ChatRPG'
             },
             body: JSON.stringify({
-                model: 'openai/gpt-oss-120b',
+                model: selectedModel,
                 messages: messages,
                 stream: true,
                 tools: tools.length > 0 ? tools : undefined
