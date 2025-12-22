@@ -555,7 +555,7 @@ You are the DM. Don't explain - PLAY.`;
                 'X-Title': 'ChatRPG'
             },
             body: JSON.stringify({
-                model: 'openai/gpt-oss-120b',
+                model: 'google/gemini-2.0-flash-001',
                 messages: messages,
                 stream: true,
                 tools: tools.length > 0 ? tools : undefined
