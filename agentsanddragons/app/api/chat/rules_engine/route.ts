@@ -28,6 +28,38 @@ function convertToTogetherAIMessages(messages: VercelChatMessage[]): Array<{ rol
 }
 
 /**
+ * Normalize tool arguments by extracting values from structured format
+ * Handles cases where AI returns {type: "string", value: "actual"} instead of just "actual"
+ */
+function normalizeToolArgs(args: any): any {
+  if (args === null || args === undefined) {
+    return args;
+  }
+  
+  if (Array.isArray(args)) {
+    return args.map(normalizeToolArgs);
+  }
+  
+  if (typeof args === 'object') {
+    // Check if this is a structured argument object with type and value
+    if ('type' in args && 'value' in args && Object.keys(args).length === 2) {
+      // Extract the value and normalize it recursively
+      return normalizeToolArgs(args.value);
+    }
+    
+    // Otherwise, normalize all properties recursively
+    const normalized: any = {};
+    for (const [key, value] of Object.entries(args)) {
+      normalized[key] = normalizeToolArgs(value);
+    }
+    return normalized;
+  }
+  
+  // Primitive value, return as-is
+  return args;
+}
+
+/**
  * Handle intermediate steps mode - returns JSON with all messages including tool calls
  */
 const handleIntermediateSteps = async (
@@ -90,9 +122,10 @@ const handleIntermediateSteps = async (
     for (const toolCall of toolCalls) {
       try {
         const toolName = toolCall.function.name;
-        const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+        const rawArgs = JSON.parse(toolCall.function.arguments || '{}');
+        const toolArgs = normalizeToolArgs(rawArgs);
         
-        console.log(`[Rules Engine API] Executing tool: ${toolName}`, toolArgs);
+        console.log(`[Rules Engine API] Executing tool: ${toolName}`, { raw: rawArgs, normalized: toolArgs });
         
         const toolResult = await mcpClientInstance.callTool(toolName, toolArgs);
         
@@ -324,9 +357,10 @@ export async function POST(req: NextRequest) {
       for (const toolCall of toolCalls) {
         try {
           const toolName = toolCall.function.name;
-          const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+          const rawArgs = JSON.parse(toolCall.function.arguments || '{}');
+          const toolArgs = normalizeToolArgs(rawArgs);
           
-          console.log(`[Rules Engine API] Executing tool: ${toolName}`, toolArgs);
+          console.log(`[Rules Engine API] Executing tool: ${toolName}`, { raw: rawArgs, normalized: toolArgs });
           
           // Execute tool via MCP SDK client
           const toolResult = await mcpClientInstance.callTool(toolName, toolArgs);

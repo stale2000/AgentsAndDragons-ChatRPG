@@ -1,5 +1,6 @@
 import { ChatWindow } from "@/components/ChatWindow";
 import { GuideInfoBox } from "@/components/guide/GuideInfoBox";
+import { StateSidebar } from "@/components/StateSidebar";
 
 export default function RulesEnginePage() {
   const InfoCard = (
@@ -52,13 +53,18 @@ export default function RulesEnginePage() {
   );
 
   return (
-    <ChatWindow
-      endpoint="api/chat/rules_engine"
-      emptyStateComponent={InfoCard}
-      placeholder="Ask me to create a character, roll dice, start combat, or use any D&D 5e mechanics!"
-      emoji="🎲"
-      showIntermediateStepsToggle={true}
-    />
+    <div className="flex h-screen">
+      <div className="flex-1 relative">
+        <ChatWindow
+          endpoint="api/chat/rules_engine"
+          emptyStateComponent={InfoCard}
+          placeholder="Ask me to create a character, roll dice, start combat, or use any D&D 5e mechanics!"
+          emoji="🎲"
+          showIntermediateStepsToggle={true}
+        />
+      </div>
+      <StateSidebar />
+    </div>
   );
 }
 
