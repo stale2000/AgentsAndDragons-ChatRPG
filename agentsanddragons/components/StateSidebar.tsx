@@ -20,7 +20,7 @@ export function StateSidebar() {
   const [characterId, setCharacterId] = useState("");
   const [encounterId, setEncounterId] = useState("");
 
-  const callTool = async (toolName: string, args: Record<string, any> = {}) => {
+  const callTool = async (toolName: string, args: Record<string, unknown> = {}): Promise<void> => {
     setLoading(toolName);
     try {
       const response = await fetch("/api/mcp-tool", {
@@ -34,7 +34,7 @@ export function StateSidebar() {
         }),
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as { content?: string; error?: string; details?: string; suggestion?: string };
 
       if (!response.ok) {
         const errorMessage = data.error || data.details || "Failed to call tool";

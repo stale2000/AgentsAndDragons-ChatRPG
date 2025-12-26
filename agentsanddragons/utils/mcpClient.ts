@@ -15,12 +15,13 @@ export interface MCPServerConfig {
 export interface MCPTool {
   name: string;
   description: string;
-  inputSchema: any;
+  inputSchema: Record<string, unknown>;
 }
 
 export interface MCPToolCallResult {
   content: Array<{ type: string; text: string }>;
   isError: boolean;
+  error?: string;
 }
 
 /**

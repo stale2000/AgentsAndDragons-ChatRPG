@@ -2,6 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { Message as VercelChatMessage, StreamingTextResponse } from "ai";
 import { MCPClient } from "@/utils/mcpClient";
 import { DND_RULES_ENGINE_SYSTEM_PROMPT } from "@/data/SystemPrompts";
+import type {
+  TogetherAIMessage,
+  TogetherAITool,
+  TogetherAIToolCall,
+  TogetherAIResponse,
+  TogetherAIResponseChoice,
+  ToolCallMessage,
+  ToolResultMessage,
+  AccumulatedToolCall,
+  RulesEngineRequest,
+  RulesEngineErrorResponse,
+  RulesEngineIntermediateStepsResponse,
+  VercelMessage,
+  NormalizedToolArgs,
+  StructuredToolArg,
+  HealthCheckResponse,
+} from "@/types/rulesEngine";
 
 export const runtime = "nodejs";
 
@@ -18,10 +35,12 @@ export async function GET() {
 /**
  * Convert Vercel AI SDK messages to Together AI API format
  */
-function convertToTogetherAIMessages(messages: VercelChatMessage[]): Array<{ role: string; content: string }> {
+function convertToTogetherAIMessages(messages: VercelChatMessage[]): TogetherAIMessage[] {
   return messages
-    .filter((msg) => msg.role === "user" || msg.role === "assistant")
-    .map((msg) => ({
+    .filter((msg): msg is VercelChatMessage & { role: "user" | "assistant" } => 
+      msg.role === "user" || msg.role === "assistant"
+    )
+    .map((msg): TogetherAIMessage => ({
       role: msg.role === "assistant" ? "assistant" : "user",
       content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
     }));
@@ -31,7 +50,7 @@ function convertToTogetherAIMessages(messages: VercelChatMessage[]): Array<{ rol
  * Normalize tool arguments by extracting values from structured format
  * Handles cases where AI returns {type: "string", value: "actual"} instead of just "actual"
  */
-function normalizeToolArgs(args: any): any {
+function normalizeToolArgs(args: unknown): NormalizedToolArgs {
   if (args === null || args === undefined) {
     return args;
   }
@@ -40,15 +59,20 @@ function normalizeToolArgs(args: any): any {
     return args.map(normalizeToolArgs);
   }
   
-  if (typeof args === 'object') {
+  if (typeof args === 'object' && args !== null) {
     // Check if this is a structured argument object with type and value
-    if ('type' in args && 'value' in args && Object.keys(args).length === 2) {
+    const structuredArg = args as Partial<StructuredToolArg>;
+    if (
+      'type' in structuredArg && 
+      'value' in structuredArg && 
+      Object.keys(structuredArg).length === 2
+    ) {
       // Extract the value and normalize it recursively
-      return normalizeToolArgs(args.value);
+      return normalizeToolArgs(structuredArg.value);
     }
     
     // Otherwise, normalize all properties recursively
-    const normalized: any = {};
+    const normalized: Record<string, NormalizedToolArgs> = {};
     for (const [key, value] of Object.entries(args)) {
       normalized[key] = normalizeToolArgs(value);
     }
@@ -56,20 +80,20 @@ function normalizeToolArgs(args: any): any {
   }
   
   // Primitive value, return as-is
-  return args;
+  return args as NormalizedToolArgs;
 }
 
 /**
  * Handle intermediate steps mode - returns JSON with all messages including tool calls
  */
 const handleIntermediateSteps = async (
-  togetherMessages: any[],
-  togetherTools: any[],
+  togetherMessages: TogetherAIMessage[],
+  togetherTools: TogetherAITool[],
   togetherApiKey: string,
   mcpClientInstance: MCPClient
-): Promise<NextResponse> => {
-  const allMessages: any[] = [...togetherMessages];
-  let currentMessages = [...togetherMessages];
+): Promise<NextResponse<RulesEngineIntermediateStepsResponse>> => {
+  const allMessages: Array<TogetherAIMessage | ToolCallMessage | ToolResultMessage> = [...togetherMessages];
+  let currentMessages: Array<TogetherAIMessage | ToolCallMessage | ToolResultMessage> = [...togetherMessages];
   let iterationCount = 0;
   const maxIterations = 10; // Prevent infinite loops
 
@@ -100,17 +124,18 @@ const handleIntermediateSteps = async (
       throw new Error(`Together AI API error: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
-    const data = await response.json();
-    const assistantMessage = data.choices[0]?.message || {};
-    const toolCalls = assistantMessage.tool_calls || [];
-    const content = assistantMessage.content || "";
+    const data = (await response.json()) as TogetherAIResponse;
+    const assistantMessage = data.choices[0]?.message;
+    const toolCalls: TogetherAIToolCall[] = assistantMessage?.tool_calls || [];
+    const content = assistantMessage?.content || "";
 
     // Add assistant message to all messages
-    allMessages.push({
+    const assistantMsg: ToolCallMessage = {
       role: "assistant",
       content: content,
       tool_calls: toolCalls,
-    });
+    };
+    allMessages.push(assistantMsg);
 
     // If no tool calls, we're done
     if (toolCalls.length === 0) {
@@ -118,22 +143,24 @@ const handleIntermediateSteps = async (
     }
 
     // Execute tool calls
-    const toolResults = [];
+    const toolResults: ToolResultMessage[] = [];
     for (const toolCall of toolCalls) {
       try {
         const toolName = toolCall.function.name;
-        const rawArgs = JSON.parse(toolCall.function.arguments || '{}');
-        const toolArgs = normalizeToolArgs(rawArgs);
+        const rawArgs = JSON.parse(toolCall.function.arguments || '{}') as unknown;
+        const toolArgs = normalizeToolArgs(rawArgs) as Record<string, NormalizedToolArgs>;
         
         console.log(`[Rules Engine API] Executing tool: ${toolName}`, { raw: rawArgs, normalized: toolArgs });
         
         const toolResult = await mcpClientInstance.callTool(toolName, toolArgs);
         
         if (toolResult.isError) {
-          throw new Error('Tool execution failed');
+          throw new Error(toolResult.error || 'Tool execution failed');
         }
         
-        const toolOutput = toolResult.content?.map((item: any) => item.text).join('\n') || '';
+        const toolOutput = toolResult.content
+          ?.map((item) => item.text)
+          .join('\n') || '';
         
         toolResults.push({
           role: "tool",
@@ -153,11 +180,7 @@ const handleIntermediateSteps = async (
     // Add tool results to messages
     allMessages.push(...toolResults);
     currentMessages.push(
-      {
-        role: "assistant",
-        content: content,
-        tool_calls: toolCalls,
-      },
+      assistantMsg,
       ...toolResults
     );
   }
@@ -166,9 +189,11 @@ const handleIntermediateSteps = async (
   await mcpClientInstance.disconnect();
 
   // Convert to Vercel AI SDK format
-  const vercelMessages = allMessages
-    .filter((msg) => msg.role === "user" || msg.role === "assistant" || msg.role === "tool")
-    .map((msg) => {
+  const vercelMessages: VercelMessage[] = allMessages
+    .filter((msg): msg is TogetherAIMessage | ToolCallMessage | ToolResultMessage => 
+      msg.role === "user" || msg.role === "assistant" || msg.role === "tool"
+    )
+    .map((msg): VercelMessage => {
       if (msg.role === "tool") {
         return {
           role: "tool",
@@ -176,10 +201,16 @@ const handleIntermediateSteps = async (
           tool_call_id: msg.tool_call_id,
         };
       }
+      if (msg.role === "assistant" && 'tool_calls' in msg && msg.tool_calls) {
+        return {
+          role: "assistant",
+          content: msg.content,
+          tool_calls: msg.tool_calls,
+        };
+      }
       return {
-        role: msg.role,
+        role: msg.role as "user" | "assistant",
         content: msg.content,
-        tool_calls: msg.tool_calls,
       };
     });
 
@@ -196,11 +227,11 @@ const handleIntermediateSteps = async (
  * This is similar to how the web-client works - Together AI handles tool calling
  * natively via MCP protocol.
  */
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIntermediateStepsResponse | RulesEngineErrorResponse> | StreamingTextResponse> {
   console.log(`[Rules Engine API] POST request received`);
   try {
-    const body = await req.json();
-    const returnIntermediateSteps = body.show_intermediate_steps;
+    const body = (await req.json()) as RulesEngineRequest;
+    const returnIntermediateSteps = body.show_intermediate_steps ?? false;
     console.log(`[Rules Engine API] Request body parsed`, {
       messageCount: body.messages?.length || 0,
       showIntermediateSteps: returnIntermediateSteps,
@@ -222,14 +253,12 @@ export async function POST(req: NextRequest) {
     const isHealthy = await mcpClientInstance.healthCheck();
     if (!isHealthy) {
       console.error(`[Rules Engine API] Health check failed - backend not available`);
-      return NextResponse.json(
-        {
-          error: `Rules engine backend is not available at ${baseUrl}. Please ensure the backend is running.`,
-          details: `Make sure you've started the backend server with: npm run build && node dist/http-server.js (from the ChatRPG root directory)`,
-          healthCheckUrl: `${baseUrl}/health`,
-        },
-        { status: 503 }
-      );
+      const errorResponse: RulesEngineErrorResponse = {
+        error: `Rules engine backend is not available at ${baseUrl}. Please ensure the backend is running.`,
+        details: `Make sure you've started the backend server with: npm run build && node dist/http-server.js (from the ChatRPG root directory)`,
+        healthCheckUrl: `${baseUrl}/health`,
+      };
+      return NextResponse.json(errorResponse, { status: 503 });
     }
     console.log(`[Rules Engine API] Health check passed`);
     
@@ -261,7 +290,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Convert messages to Together AI format
-    const togetherMessages = [
+    const togetherMessages: TogetherAIMessage[] = [
       {
         role: "system",
         content: DND_RULES_ENGINE_SYSTEM_PROMPT,
@@ -279,16 +308,14 @@ export async function POST(req: NextRequest) {
       console.log(`[Rules Engine API] Fetched ${mcpTools.length} tools from MCP server`);
     } catch (error) {
       await mcpClientInstance.disconnect();
-      return NextResponse.json(
-        {
-          error: `Failed to fetch tools: ${error instanceof Error ? error.message : String(error)}`,
-        },
-        { status: 500 }
-      );
+      const errorResponse: RulesEngineErrorResponse = {
+        error: `Failed to fetch tools: ${error instanceof Error ? error.message : String(error)}`,
+      };
+      return NextResponse.json(errorResponse, { status: 500 });
     }
     
     // Convert MCP tools to Together AI function calling format
-    const togetherTools = mcpTools.map((tool) => ({
+    const togetherTools: TogetherAITool[] = mcpTools.map((tool) => ({
       type: "function",
       function: {
         name: tool.name,
@@ -300,7 +327,7 @@ export async function POST(req: NextRequest) {
     // Handle intermediate steps vs streaming
     if (returnIntermediateSteps) {
       // For intermediate steps, we need to return JSON (non-streaming)
-      // This matches the pattern used in the agents route
+      // This matches the pattern used in intermediate steps mode
       return await handleIntermediateSteps(
         togetherMessages,
         togetherTools,
@@ -344,21 +371,21 @@ export async function POST(req: NextRequest) {
 
     // Helper function to execute tool calls via MCP server
     async function executeToolCalls(
-      toolCalls: any[],
+      toolCalls: AccumulatedToolCall[],
       mcpClientInstance: MCPClient,
-      messages: any[],
+      messages: Array<TogetherAIMessage | ToolCallMessage | ToolResultMessage>,
       apiKey: string,
       controller: ReadableStreamDefaultController,
       encoder: TextEncoder
-    ) {
+    ): Promise<void> {
       console.log(`[Rules Engine API] Executing ${toolCalls.length} tool calls`);
       
-      const toolResults = [];
+      const toolResults: ToolResultMessage[] = [];
       for (const toolCall of toolCalls) {
         try {
           const toolName = toolCall.function.name;
-          const rawArgs = JSON.parse(toolCall.function.arguments || '{}');
-          const toolArgs = normalizeToolArgs(rawArgs);
+          const rawArgs = JSON.parse(toolCall.function.arguments || '{}') as unknown;
+          const toolArgs = normalizeToolArgs(rawArgs) as Record<string, NormalizedToolArgs>;
           
           console.log(`[Rules Engine API] Executing tool: ${toolName}`, { raw: rawArgs, normalized: toolArgs });
           
@@ -366,10 +393,12 @@ export async function POST(req: NextRequest) {
           const toolResult = await mcpClientInstance.callTool(toolName, toolArgs);
           
           if (toolResult.isError) {
-            throw new Error('Tool execution failed');
+            throw new Error(toolResult.error || 'Tool execution failed');
           }
           
-          const toolOutput = toolResult.content?.map((item: any) => item.text).join('\n') || '';
+          const toolOutput = toolResult.content
+            ?.map((item) => item.text)
+            .join('\n') || '';
           
           console.log(`[Rules Engine API] Tool ${toolName} result:`, toolOutput.substring(0, 200));
           
@@ -389,7 +418,7 @@ export async function POST(req: NextRequest) {
       }
       
       // Send tool results back to Together AI for final response
-      const followUpMessages = [
+      const followUpMessages: Array<TogetherAIMessage | ToolCallMessage | ToolResultMessage> = [
         ...messages,
         ...toolResults,
       ];
@@ -429,7 +458,7 @@ export async function POST(req: NextRequest) {
                 if (data === "[DONE]") return;
                 
                 try {
-                  const parsed = JSON.parse(data);
+                  const parsed = JSON.parse(data) as TogetherAIResponse;
                   const content = parsed.choices?.[0]?.delta?.content;
                   if (content) {
                     controller.enqueue(encoder.encode(content));
@@ -446,7 +475,7 @@ export async function POST(req: NextRequest) {
 
     // Stream the response and handle tool calls
     const encoder = new TextEncoder();
-    let accumulatedToolCalls: any[] = [];
+    let accumulatedToolCalls: AccumulatedToolCall[] = [];
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -491,14 +520,15 @@ export async function POST(req: NextRequest) {
                 }
 
                 try {
-                  const parsed = JSON.parse(data);
-                  const delta = parsed.choices?.[0]?.delta || {};
-                  const finishReason = parsed.choices?.[0]?.finish_reason;
+                  const parsed = JSON.parse(data) as TogetherAIResponse;
+                  const choice: TogetherAIResponseChoice | undefined = parsed.choices?.[0];
+                  const delta = choice?.delta;
+                  const finishReason = choice?.finish_reason;
                   
                   // Handle tool call deltas
-                  if (delta.tool_calls) {
+                  if (delta?.tool_calls) {
                     for (const toolCallDelta of delta.tool_calls) {
-                      const index = toolCallDelta.index || 0;
+                      const index = toolCallDelta.index ?? 0;
                       if (!accumulatedToolCalls[index]) {
                         accumulatedToolCalls[index] = {
                           id: toolCallDelta.id || `call_${Date.now()}_${index}`,
@@ -520,7 +550,7 @@ export async function POST(req: NextRequest) {
                   }
                   
                   // Handle content
-                  const content = delta.content;
+                  const content = delta?.content;
                   if (content) {
                     controller.enqueue(encoder.encode(content));
                   }
@@ -549,17 +579,17 @@ export async function POST(req: NextRequest) {
     });
 
     return new StreamingTextResponse(stream);
-  } catch (e: any) {
-    console.error("[Rules Engine API] Error:", e);
-    console.error("[Rules Engine API] Error stack:", e.stack);
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error(String(e));
+    console.error("[Rules Engine API] Error:", error);
+    console.error("[Rules Engine API] Error stack:", error.stack);
     console.error("[Rules Engine API] Error details:", {
-      message: e.message,
-      name: e.name,
-      status: e.status,
+      message: error.message,
+      name: error.name,
     });
-    return NextResponse.json(
-      { error: e.message },
-      { status: e.status ?? 500 }
-    );
+    const errorResponse: RulesEngineErrorResponse = {
+      error: error.message,
+    };
+    return NextResponse.json(errorResponse, { status: 500 });
   }
 }
