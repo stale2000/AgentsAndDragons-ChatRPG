@@ -187,22 +187,75 @@ export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIn
       encoder: TextEncoder
     ): Promise<void> {
       const toolResults = await executeToolCalls(toolCalls, mcpClient);
+      
+      // Convert messages to Together AI format, filtering tool messages
+      // Together AI expects messages in a specific format
+      const togetherMessages: TogetherAIMessage[] = messages
+        .filter((msg): msg is TogetherAIMessage => msg.role === "user" || msg.role === "assistant")
+        .map((msg) => ({
+          ...msg,
+          content: filterTogetherAIMarkers(msg.content), // Ensure no markers leak through
+        }));
+      
+      // Add tool results as assistant messages (Together AI may not support tool role)
+      toolResults.forEach((result) => {
+        togetherMessages.push({
+          role: "assistant",
+          content: `[Tool: ${toolCalls.find(tc => tc.id === result.tool_call_id)?.function.name || 'unknown'}] ${result.content}`,
+        });
+      });
+      
       const followUpResponse = await callTogetherAI({
-        messages: [...messages, ...toolResults],
+        messages: togetherMessages,
+        tools: togetherTools, // Include tools for follow-up response
         stream: true,
       });
 
       if (!followUpResponse.ok || !followUpResponse.body) return;
 
+      // Handle follow-up response - it might also contain tool calls
+      let followUpBuffer = "";
+      const followUpPendingCalls: AccumulatedToolCall[] = [];
+      let followUpHasToolCalls = false;
+
       const reader = followUpResponse.body.getReader();
-      await parseSSEStream(reader, {
+      const followUpResult = await parseSSEStream(reader, {
         onContent: (content) => {
-          const cleanedContent = filterTogetherAIMarkers(content);
-          if (cleanedContent) {
-            controller.enqueue(encoder.encode(cleanedContent));
+          followUpBuffer += content;
+          
+          if (!followUpHasToolCalls) {
+            const parsedToolCalls = parseToolCallsFromContent(followUpBuffer);
+            if (parsedToolCalls.length > 0) {
+              followUpHasToolCalls = true;
+              console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Follow-up response contains ${parsedToolCalls.length} tool calls`);
+              
+              for (let i = 0; i < parsedToolCalls.length; i++) {
+                const parsed = parsedToolCalls[i];
+                followUpPendingCalls.push({
+                  id: `call_${Date.now()}_${i}`,
+                  type: "function",
+                  function: {
+                    name: parsed.name,
+                    arguments: JSON.stringify(parsed.parameters),
+                  },
+                });
+              }
+            }
           }
         },
       });
+
+      // If follow-up has tool calls, execute them recursively
+      if (followUpHasToolCalls && followUpPendingCalls.length > 0) {
+        console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Executing ${followUpPendingCalls.length} tool calls from follow-up`);
+        await executeToolCallsAndStream(followUpPendingCalls, togetherMessages, controller, encoder);
+      } else {
+        // Stream the cleaned follow-up content
+        const cleanedContent = filterTogetherAIMarkers(followUpBuffer);
+        if (cleanedContent.trim()) {
+          controller.enqueue(encoder.encode(cleanedContent));
+        }
+      }
     }
 
     const encoder = new TextEncoder();
@@ -221,37 +274,41 @@ export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIn
         try {
           const result = await parseSSEStream(reader, {
             onContent: (content) => {
-              // Always filter markers from content before processing
-              const cleanedContent = filterTogetherAIMarkers(content);
-              contentBuffer += content; // Keep original for parsing
+              contentBuffer += content; // Always accumulate in buffer
               
-              // Check for embedded tool calls in content buffer (with markers or plain JSON)
-              const parsedToolCalls = parseToolCallsFromContent(contentBuffer);
-              if (parsedToolCalls.length > 0) {
-                hasToolCallDeltas = true;
-                console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Found ${parsedToolCalls.length} tool calls in content`);
+              // CRITICAL: If we see tool call markers AT ALL, stop streaming immediately
+              // Set flag FIRST, then try to parse
+              if (content.includes("<|python_start|>") || content.includes("<|python_end|>") || 
+                  contentBuffer.includes("<|python_start|>") || contentBuffer.includes("<|python_end|>")) {
+                hasToolCallDeltas = true; // Set flag IMMEDIATELY to prevent any streaming
                 
-                // Convert parsed tool calls to AccumulatedToolCall format
-                for (let i = 0; i < parsedToolCalls.length; i++) {
-                  const parsed = parsedToolCalls[i];
-                  pendingToolCalls.push({
-                    id: `call_${Date.now()}_${i}`,
-                    type: "function",
-                    function: {
-                      name: parsed.name,
-                      arguments: JSON.stringify(parsed.parameters),
-                    },
-                  });
+                // Try to parse tool calls from the buffer (only if we haven't already parsed them)
+                if (pendingToolCalls.length === 0) {
+                  const parsedToolCalls = parseToolCallsFromContent(contentBuffer);
+                  if (parsedToolCalls.length > 0) {
+                    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Found ${parsedToolCalls.length} tool calls:`, 
+                      parsedToolCalls.map(tc => `${tc.name}(${JSON.stringify(tc.parameters).substring(0, 100)})`));
+                    
+                    for (let i = 0; i < parsedToolCalls.length; i++) {
+                      const parsed = parsedToolCalls[i];
+                      pendingToolCalls.push({
+                        id: `call_${Date.now()}_${i}`,
+                        type: "function",
+                        function: {
+                          name: parsed.name,
+                          arguments: JSON.stringify(parsed.parameters),
+                        },
+                      });
+                    }
+                  }
                 }
                 
-                // Don't stream content that contains tool calls
+                // NEVER stream content with markers - return immediately
                 return;
               }
               
-              // Only stream cleaned content if we haven't detected tool calls
-              if (!hasToolCallDeltas && cleanedContent) {
-                controller.enqueue(encoder.encode(cleanedContent));
-              }
+              // If no markers detected, still don't stream during streaming
+              // We'll check everything at the end
             },
             onToolCallDelta: (delta) => {
               hasToolCallDeltas = true;
@@ -288,18 +345,74 @@ export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIn
             pendingToolCalls: pendingToolCalls.length,
             hasToolCalls: result.hasToolCalls,
             hasToolCallDeltas,
+            contentBufferLength: contentBuffer.length,
+            contentBufferPreview: contentBuffer.substring(0, 200),
+            hasPythonMarkers: contentBuffer.includes("<|python_start|>"),
           });
 
+          // CRITICAL: Check for markers FIRST - if ANY markers present, NEVER stream
+          const hasMarkers = contentBuffer.includes("<|python_start|>") || contentBuffer.includes("<|python_end|>");
+          
+          // ABSOLUTE CHECK: If markers are present, NEVER stream, no matter what
+          if (hasMarkers) {
+            console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} MARKERS DETECTED! Blocking ALL streaming. Buffer preview:`, contentBuffer.substring(0, 200));
+            hasToolCallDeltas = true; // Set flag to prevent streaming
+            
+            // Try to parse tool calls
+            if (pendingToolCalls.length === 0) {
+              const finalParsedToolCalls = parseToolCallsFromContent(contentBuffer);
+              if (finalParsedToolCalls.length > 0) {
+                console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Parsed ${finalParsedToolCalls.length} tool calls from markers`);
+                for (let i = 0; i < finalParsedToolCalls.length; i++) {
+                  const parsed = finalParsedToolCalls[i];
+                  pendingToolCalls.push({
+                    id: `call_${Date.now()}_${i}`,
+                    type: "function",
+                    function: {
+                      name: parsed.name,
+                      arguments: JSON.stringify(parsed.parameters),
+                    },
+                  });
+                }
+              } else {
+                console.error(`${RULES_ENGINE_CONFIG.LOG_PREFIX} FAILED to parse tool calls! Buffer:`, contentBuffer.substring(0, 500));
+              }
+            }
+            
+            // Execute tool calls if we have them
+            if (pendingToolCalls.length > 0) {
+              console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Executing ${pendingToolCalls.length} tool calls`);
+              await executeToolCallsAndStream(pendingToolCalls, togetherMessages, controller, encoder);
+            } else {
+              console.error(`${RULES_ENGINE_CONFIG.LOG_PREFIX} CRITICAL: Markers found but no tool calls parsed! NOT STREAMING.`);
+            }
+            // ABSOLUTELY DO NOT STREAM - markers are present
+            return; // Exit early - never stream content with markers
+          }
+          
+          // Only proceed if NO markers detected
           if ((result.finishReason === "tool_calls" || hasToolCallDeltas) && pendingToolCalls.length > 0) {
-            console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Executing ${pendingToolCalls.length} tool calls`);
+            // No markers but tool calls detected via deltas
+            console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Executing ${pendingToolCalls.length} tool calls from deltas`);
             await executeToolCallsAndStream(pendingToolCalls, togetherMessages, controller, encoder);
-          } else if (contentBuffer && !hasToolCallDeltas) {
-            // Stream buffered content if no tool calls were detected
+          } else if (contentBuffer && !hasMarkers && !hasToolCallDeltas) {
+            // Double-check: NO markers before streaming
+            const finalMarkerCheck = contentBuffer.includes("<|python_start|>") || contentBuffer.includes("<|python_end|>");
+            if (finalMarkerCheck) {
+              console.error(`${RULES_ENGINE_CONFIG.LOG_PREFIX} CRITICAL: Markers detected in final check! NOT STREAMING.`);
+              return;
+            }
+            
+            // Only stream if absolutely no markers and no tool calls
             const cleanedContent = filterTogetherAIMarkers(contentBuffer);
             if (cleanedContent.trim()) {
               controller.enqueue(encoder.encode(cleanedContent));
             }
+          } else {
+            // Safety: Don't stream
+            console.warn(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Not streaming. hasMarkers=${hasMarkers}, hasToolCallDeltas=${hasToolCallDeltas}`);
           }
+          
         } catch (error) {
           console.error(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Stream error:`, error);
           controller.error(error);

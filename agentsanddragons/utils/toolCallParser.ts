@@ -27,7 +27,28 @@ export function parseToolCallsFromContent(content: string): ParsedToolCall[] {
     if (startPos === -1) break;
 
     const endPos = content.indexOf(pythonEndMarker, startPos + pythonStartMarker.length);
-    if (endPos === -1) break;
+    if (endPos === -1) {
+      // Start marker found but no end marker yet - might be incomplete
+      // Try to parse what we have if it looks like complete JSON
+      const potentialJson = content.slice(startPos + pythonStartMarker.length).trim();
+      if (potentialJson.startsWith("{") && potentialJson.includes("\"name\"") && potentialJson.includes("\"parameters\"")) {
+        // Might be a complete tool call even without end marker
+        try {
+          const parsed = JSON.parse(potentialJson) as { name: string; parameters?: Record<string, unknown> };
+          if (parsed.name && parsed.parameters) {
+            const normalizedParams = normalizeToolArgs(parsed.parameters) as Record<string, NormalizedToolArgs>;
+            toolCalls.push({
+              name: parsed.name,
+              parameters: normalizedParams,
+            });
+            break; // Found one, stop looking
+          }
+        } catch {
+          // Not valid JSON yet, wait for more content
+        }
+      }
+      break; // No end marker, can't parse complete tool call
+    }
 
     const toolCallJson = content.slice(
       startPos + pythonStartMarker.length,

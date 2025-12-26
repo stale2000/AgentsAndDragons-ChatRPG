@@ -14,16 +14,32 @@ import { RULES_ENGINE_CONFIG } from "./rulesEngineConfig";
 
 /**
  * Convert Vercel AI SDK messages to Together AI API format
+ * Filters out tool messages and cleans tool call markers from content
  */
 export function convertToTogetherAIMessages(messages: VercelChatMessage[]): TogetherAIMessage[] {
   return messages
     .filter((msg): msg is VercelChatMessage & { role: "user" | "assistant" } => 
       msg.role === "user" || msg.role === "assistant"
     )
-    .map((msg): TogetherAIMessage => ({
-      role: msg.role === "assistant" ? "assistant" : "user",
-      content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
-    }));
+    .map((msg): TogetherAIMessage => {
+      let content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      
+      // Remove any tool call markers that might have leaked into conversation history
+      // This prevents the AI from seeing and replicating tool call formats
+      content = content
+        .replace(/<\|python_start\|>.*?<\|python_end\|>/gs, "")
+        .replace(/<\|header_start\|>.*?<\|header_end\|>/gs, "")
+        .replace(/<\|python_start\|>/g, "")
+        .replace(/<\|python_end\|>/g, "")
+        .replace(/<\|header_start\|>/g, "")
+        .replace(/<\|header_end\|>/g, "")
+        .trim();
+      
+      return {
+        role: msg.role === "assistant" ? "assistant" : "user",
+        content,
+      };
+    });
 }
 
 /**
@@ -100,6 +116,7 @@ export function extractToolOutput(
 /**
  * Normalize tool arguments by extracting values from structured format
  * Handles cases where AI returns {type: "string", value: "actual"} instead of just "actual"
+ * Also handles stringified JSON (e.g., "[{...}]" as a string should become an array)
  */
 export function normalizeToolArgs(args: unknown): NormalizedToolArgs {
   if (args === null || args === undefined) {
@@ -108,6 +125,22 @@ export function normalizeToolArgs(args: unknown): NormalizedToolArgs {
 
   if (Array.isArray(args)) {
     return args.map(normalizeToolArgs);
+  }
+
+  if (typeof args === 'string') {
+    // Check if this is a stringified JSON array or object
+    const trimmed = args.trim();
+    if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || 
+        (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+      try {
+        const parsed = JSON.parse(args);
+        // Recursively normalize the parsed value
+        return normalizeToolArgs(parsed);
+      } catch {
+        // Not valid JSON, return as-is
+      }
+    }
+    return args;
   }
 
   if (typeof args === 'object' && args !== null) {
