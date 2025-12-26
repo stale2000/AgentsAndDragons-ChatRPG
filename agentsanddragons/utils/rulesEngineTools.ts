@@ -51,12 +51,12 @@ function jsonSchemaToZod(jsonSchema: JsonSchema): z.ZodTypeAny {
         } else if (items?.type === 'number' || items?.type === 'integer') {
           zodType = z.array(z.number());
         } else if (items?.type === 'object') {
-          zodType = z.array(z.record(z.any()));
+          zodType = z.array(z.record(z.string(), z.any()));
         } else {
           zodType = z.array(z.any());
         }
       } else if (propSchema.type === 'object') {
-        zodType = z.record(z.any());
+        zodType = z.record(z.string(), z.any());
       } else {
         zodType = z.any();
       }

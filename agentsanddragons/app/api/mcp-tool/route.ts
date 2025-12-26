@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { HealthCheckResponse } from "@/types/rulesEngine";
+import {
+  getBackendUrl,
+  getHealthCheckUrl,
+  getToolUrl,
+  RULES_ENGINE_CONFIG,
+} from "@/utils/rulesEngineConfig";
+import {
+  createErrorResponse,
+  checkBackendHealth,
+  extractToolOutput,
+} from "@/utils/rulesEngineHelpers";
 
 export const runtime = "nodejs";
 
@@ -25,42 +36,34 @@ type MCPToolResponse = MCPToolSuccessResponse | MCPToolErrorResponse;
  * GET endpoint to test backend connection
  */
 export async function GET(req: NextRequest): Promise<NextResponse<{ connected: boolean; status?: string; url: string; error?: string; suggestion?: string }>> {
-  const baseUrl = (process.env.RULES_ENGINE_URL || 'http://localhost:8080').replace(/\/$/, '');
+  const baseUrl = getBackendUrl();
   
-  try {
-    const healthResponse = await fetch(`${baseUrl}/health`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(5000),
-    });
-    
-    if (!healthResponse.ok) {
-      return NextResponse.json(
-        {
-          connected: false,
-          error: `Backend returned status ${healthResponse.status}`,
-          url: baseUrl,
-        },
-        { status: 503 }
-      );
-    }
-    
-    const healthData = (await healthResponse.json()) as HealthCheckResponse;
-    return NextResponse.json({
-      connected: true,
-      status: healthData.status,
-      url: baseUrl,
-    });
-  } catch (error) {
+  const healthCheck = await checkBackendHealth();
+  
+  if (!healthCheck.healthy) {
     return NextResponse.json(
       {
         connected: false,
-        error: error instanceof Error ? error.message : "Connection failed",
+        error: healthCheck.error,
         url: baseUrl,
         suggestion: "Make sure the backend is running with: npm run build && node dist/http-server.js (from the ChatRPG root directory)",
       },
       { status: 503 }
     );
   }
+  
+  // Fetch full health data for status
+  const healthResponse = await fetch(getHealthCheckUrl(), {
+    method: 'GET',
+    signal: AbortSignal.timeout(RULES_ENGINE_CONFIG.HEALTH_CHECK_TIMEOUT),
+  });
+  const healthData = (await healthResponse.json()) as HealthCheckResponse;
+  
+  return NextResponse.json({
+    connected: true,
+    status: healthData.status,
+    url: baseUrl,
+  });
 }
 
 /**
@@ -81,54 +84,26 @@ export async function POST(req: NextRequest): Promise<NextResponse<MCPToolRespon
       return NextResponse.json(errorResponse, { status: 400 });
     }
 
-    // Get backend URL from environment or use default
-    const baseUrl = (process.env.RULES_ENGINE_URL || 'http://localhost:8080').replace(/\/$/, '');
-    const toolUrl = `${baseUrl}/tool`;
+    // Get backend URL
+    const baseUrl = getBackendUrl();
+    const toolUrl = getToolUrl();
     
-    console.log(`[MCP Tool API] Calling tool: ${toolName} at ${toolUrl}`);
+    console.log(`${RULES_ENGINE_CONFIG.MCP_LOG_PREFIX} Calling tool: ${toolName} at ${toolUrl}`);
     
     // First, check backend health
-    try {
-      const healthResponse = await fetch(`${baseUrl}/health`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(5000), // 5 second timeout
-      });
-      
-      if (!healthResponse.ok) {
-        const healthData = await healthResponse.json().catch(() => ({}));
-        console.error(`[MCP Tool API] Health check failed: ${healthResponse.status}`, healthData);
-        return NextResponse.json(
-          {
-            error: `Rules engine backend is not available at ${baseUrl}`,
-            details: `Health check returned status ${healthResponse.status}. Make sure the backend is running with: npm run build && node dist/http-server.js (from the ChatRPG root directory)`,
-            healthCheckUrl: `${baseUrl}/health`,
-          },
-          { status: 503 }
-        );
-      }
-      
-      const healthData = (await healthResponse.json()) as HealthCheckResponse;
-      if (healthData.status !== 'ok') {
-        console.error(`[MCP Tool API] Health check returned non-ok status:`, healthData);
-        const errorResponse: MCPToolErrorResponse = {
-          error: `Rules engine backend health check failed`,
-          details: `Backend returned status: ${healthData.status}`,
-        };
-        return NextResponse.json(errorResponse, { status: 503 });
-      }
-      
-      console.log(`[MCP Tool API] Health check passed`);
-    } catch (error) {
-      console.error(`[MCP Tool API] Health check error:`, error);
-      return NextResponse.json(
-        {
-          error: `Failed to connect to rules engine backend at ${baseUrl}`,
-          details: error instanceof Error ? error.message : "Connection failed",
-          suggestion: "Make sure the backend is running with: npm run build && node dist/http-server.js (from the ChatRPG root directory)",
-        },
-        { status: 503 }
+    const healthCheck = await checkBackendHealth();
+    if (!healthCheck.healthy) {
+      console.error(`${RULES_ENGINE_CONFIG.MCP_LOG_PREFIX} Health check failed:`, healthCheck.error);
+      const errorResponse = createErrorResponse(
+        `Rules engine backend is not available at ${baseUrl}`,
+        healthCheck.error,
+        "Make sure the backend is running with: npm run build && node dist/http-server.js (from the ChatRPG root directory)",
+        getHealthCheckUrl()
       );
+      return NextResponse.json(errorResponse, { status: 503 });
     }
+    
+    console.log(`${RULES_ENGINE_CONFIG.MCP_LOG_PREFIX} Health check passed`);
 
     // Call the tool via direct HTTP endpoint
     try {
@@ -141,25 +116,23 @@ export async function POST(req: NextRequest): Promise<NextResponse<MCPToolRespon
           name: toolName,
           arguments: args || {},
         }),
-        signal: AbortSignal.timeout(30000), // 30 second timeout for tool execution
+        signal: AbortSignal.timeout(RULES_ENGINE_CONFIG.TOOL_EXECUTION_TIMEOUT),
       });
 
       if (!toolResponse.ok) {
-        const errorData = await toolResponse.json().catch(() => ({ error: 'Unknown error' }));
-        console.error(`[MCP Tool API] Tool call failed: ${toolResponse.status}`, errorData);
-        return NextResponse.json(
-          {
-            error: errorData.error || `Tool execution failed with status ${toolResponse.status}`,
-          },
-          { status: toolResponse.status >= 500 ? 500 : 400 }
-        );
+        const errorData = (await toolResponse.json().catch(() => ({ error: 'Unknown error' }))) as { error?: string };
+        console.error(`${RULES_ENGINE_CONFIG.MCP_LOG_PREFIX} Tool call failed: ${toolResponse.status}`, errorData);
+        const errorResponse: MCPToolErrorResponse = {
+          error: errorData.error || `Tool execution failed with status ${toolResponse.status}`,
+        };
+        return NextResponse.json(errorResponse, { status: toolResponse.status >= 500 ? 500 : 400 });
       }
 
       const result = (await toolResponse.json()) as { isError?: boolean; content?: Array<{ type: string; text: string }>; error?: string };
       
       // The /tool endpoint returns MCP CallToolResult format
       if (result.isError) {
-        const errorText = result.content?.map((item) => item.text).join('\n') || result.error || "Tool execution failed";
+        const errorText = extractToolOutput(result.content) || result.error || "Tool execution failed";
         const errorResponse: MCPToolErrorResponse = {
           error: errorText,
         };
@@ -167,9 +140,9 @@ export async function POST(req: NextRequest): Promise<NextResponse<MCPToolRespon
       }
       
       // Extract text content from result
-      const content = result.content?.map((item) => item.text).join('\n') || '';
+      const content = extractToolOutput(result.content);
       
-      console.log(`[MCP Tool API] Tool ${toolName} executed successfully`);
+      console.log(`${RULES_ENGINE_CONFIG.MCP_LOG_PREFIX} Tool ${toolName} executed successfully`);
       
       const successResponse: MCPToolSuccessResponse = {
         success: true,
@@ -177,11 +150,11 @@ export async function POST(req: NextRequest): Promise<NextResponse<MCPToolRespon
       };
       return NextResponse.json(successResponse);
     } catch (error) {
-      console.error(`[MCP Tool API] Tool call error:`, error);
+      console.error(`${RULES_ENGINE_CONFIG.MCP_LOG_PREFIX} Tool call error:`, error);
       
       if (error instanceof Error && error.name === 'AbortError') {
         const errorResponse: MCPToolErrorResponse = {
-          error: "Tool execution timed out after 30 seconds",
+          error: `Tool execution timed out after ${RULES_ENGINE_CONFIG.TOOL_EXECUTION_TIMEOUT / 1000} seconds`,
         };
         return NextResponse.json(errorResponse, { status: 504 });
       }
@@ -192,7 +165,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<MCPToolRespon
       return NextResponse.json(errorResponse, { status: 500 });
     }
   } catch (error) {
-    console.error("[MCP Tool API] Unexpected error:", error);
+    console.error(`${RULES_ENGINE_CONFIG.MCP_LOG_PREFIX} Unexpected error:`, error);
     const errorResponse: MCPToolErrorResponse = {
       error: error instanceof Error ? error.message : "Unknown error",
     };
