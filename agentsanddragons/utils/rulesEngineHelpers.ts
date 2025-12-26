@@ -10,7 +10,7 @@ import type {
   TogetherAIMessage,
 } from "@/types/rulesEngine";
 import type { Message as VercelChatMessage } from "ai";
-import { RULES_ENGINE_CONFIG, getHealthCheckUrl } from "./rulesEngineConfig";
+import { RULES_ENGINE_CONFIG } from "./rulesEngineConfig";
 
 /**
  * Convert Vercel AI SDK messages to Together AI API format
@@ -50,7 +50,7 @@ export function createBackendUnavailableError(baseUrl: string): RulesEngineError
     `Rules engine backend is not available at ${baseUrl}. Please ensure the backend is running.`,
     `Make sure you've started the backend server with: npm run build && node dist/http-server.js (from the ChatRPG root directory)`,
     undefined,
-    getHealthCheckUrl()
+    RULES_ENGINE_CONFIG.HEALTH_CHECK_URL
   );
 }
 
@@ -59,8 +59,7 @@ export function createBackendUnavailableError(baseUrl: string): RulesEngineError
  */
 export async function checkBackendHealth(): Promise<{ healthy: boolean; error?: string }> {
   try {
-    const healthUrl = getHealthCheckUrl();
-    const response = await fetch(healthUrl, {
+    const response = await fetch(RULES_ENGINE_CONFIG.HEALTH_CHECK_URL, {
       method: 'GET',
       signal: AbortSignal.timeout(RULES_ENGINE_CONFIG.HEALTH_CHECK_TIMEOUT),
     });

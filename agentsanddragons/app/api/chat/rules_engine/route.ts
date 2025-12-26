@@ -2,12 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Message as VercelChatMessage, StreamingTextResponse } from "ai";
 import { MCPClient } from "@/utils/mcpClient";
 import { DND_RULES_ENGINE_SYSTEM_PROMPT } from "@/data/SystemPrompts";
-import {
-  getBackendUrl,
-  getMcpServerUrl,
-  getTogetherApiKey,
-  RULES_ENGINE_CONFIG,
-} from "@/utils/rulesEngineConfig";
+import { RULES_ENGINE_CONFIG } from "@/utils/rulesEngineConfig";
 import {
   createBackendUnavailableError,
   createErrorResponse,
@@ -153,19 +148,17 @@ export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIn
     const messages = body.messages ?? [];
     
     // Initialize MCP client
-    const baseUrl = getBackendUrl();
-    const mcpServerUrl = getMcpServerUrl();
-    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} MCP Server URL: ${mcpServerUrl}`);
-    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Base URL: ${baseUrl}`);
+    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} MCP Server URL: ${RULES_ENGINE_CONFIG.MCP_SERVER_URL}`);
+    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Base URL: ${RULES_ENGINE_CONFIG.BACKEND_URL}`);
     
-    const mcpClientInstance = new MCPClient({ url: mcpServerUrl });
+    const mcpClientInstance = new MCPClient({ url: RULES_ENGINE_CONFIG.MCP_SERVER_URL });
     
     // Check backend health
     console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Checking backend health`);
     const healthCheck = await checkBackendHealth();
     if (!healthCheck.healthy) {
       console.error(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Health check failed:`, healthCheck.error);
-      return NextResponse.json(createBackendUnavailableError(baseUrl), { status: 503 });
+      return NextResponse.json(createBackendUnavailableError(RULES_ENGINE_CONFIG.BACKEND_URL), { status: 503 });
     }
     console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Health check passed`);
     
@@ -178,14 +171,13 @@ export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIn
       console.error(`${RULES_ENGINE_CONFIG.LOG_PREFIX} MCP connection failed:`, error);
       const errorResponse = createErrorResponse(
         `Failed to connect to MCP server: ${error instanceof Error ? error.message : String(error)}`,
-        `Check that the backend server is running and accessible at ${mcpServerUrl}`
+        `Check that the backend server is running and accessible at ${RULES_ENGINE_CONFIG.MCP_SERVER_URL}`
       );
       return NextResponse.json(errorResponse, { status: 503 });
     }
 
     // Get Together AI API key
-    const togetherApiKey = getTogetherApiKey();
-    if (!togetherApiKey) {
+    if (!RULES_ENGINE_CONFIG.TOGETHER_API_KEY) {
       const errorResponse = createErrorResponse(
         "TOGETHER_API_KEY environment variable is not set."
       );
@@ -201,7 +193,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIn
       ...convertMessages(messages),
     ];
 
-    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Calling Together AI with MCP server: ${mcpServerUrl}`);
+    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Calling Together AI with MCP server: ${RULES_ENGINE_CONFIG.MCP_SERVER_URL}`);
     console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Message count: ${togetherMessages.length}`);
 
     // Fetch tools from MCP server using MCP SDK client

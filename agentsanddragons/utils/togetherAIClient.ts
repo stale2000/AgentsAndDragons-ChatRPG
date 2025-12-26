@@ -9,7 +9,7 @@ import type {
   ToolCallMessage,
   ToolResultMessage,
 } from "@/types/rulesEngine";
-import { RULES_ENGINE_CONFIG, getTogetherApiKey } from "./rulesEngineConfig";
+import { RULES_ENGINE_CONFIG } from "./rulesEngineConfig";
 
 export type TogetherAIMessageUnion = TogetherAIMessage | ToolCallMessage | ToolResultMessage;
 
@@ -29,8 +29,7 @@ export function createTogetherAIRequest(options: TogetherAIRequestOptions): {
   headers: HeadersInit;
   body: string;
 } {
-  const apiKey = getTogetherApiKey();
-  if (!apiKey) {
+  if (!RULES_ENGINE_CONFIG.TOGETHER_API_KEY) {
     throw new Error("TOGETHER_API_KEY environment variable is not set");
   }
 
@@ -38,7 +37,7 @@ export function createTogetherAIRequest(options: TogetherAIRequestOptions): {
     url: RULES_ENGINE_CONFIG.TOGETHER_AI_BASE_URL,
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
+      "Authorization": `Bearer ${RULES_ENGINE_CONFIG.TOGETHER_API_KEY}`,
     },
     body: JSON.stringify({
       model: RULES_ENGINE_CONFIG.MODEL_NAME,

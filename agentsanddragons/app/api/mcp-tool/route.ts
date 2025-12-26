@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { HealthCheckResponse } from "@/types/rulesEngine";
-import {
-  getBackendUrl,
-  getHealthCheckUrl,
-  getToolUrl,
-  RULES_ENGINE_CONFIG,
-} from "@/utils/rulesEngineConfig";
+import { RULES_ENGINE_CONFIG } from "@/utils/rulesEngineConfig";
 import {
   createErrorResponse,
   checkBackendHealth,
@@ -36,8 +31,6 @@ type MCPToolResponse = MCPToolSuccessResponse | MCPToolErrorResponse;
  * GET endpoint to test backend connection
  */
 export async function GET(req: NextRequest): Promise<NextResponse<{ connected: boolean; status?: string; url: string; error?: string; suggestion?: string }>> {
-  const baseUrl = getBackendUrl();
-  
   const healthCheck = await checkBackendHealth();
   
   if (!healthCheck.healthy) {
@@ -45,7 +38,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<{ connected: b
       {
         connected: false,
         error: healthCheck.error,
-        url: baseUrl,
+        url: RULES_ENGINE_CONFIG.BACKEND_URL,
         suggestion: "Make sure the backend is running with: npm run build && node dist/http-server.js (from the ChatRPG root directory)",
       },
       { status: 503 }
@@ -53,7 +46,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<{ connected: b
   }
   
   // Fetch full health data for status
-  const healthResponse = await fetch(getHealthCheckUrl(), {
+  const healthResponse = await fetch(RULES_ENGINE_CONFIG.HEALTH_CHECK_URL, {
     method: 'GET',
     signal: AbortSignal.timeout(RULES_ENGINE_CONFIG.HEALTH_CHECK_TIMEOUT),
   });
@@ -62,7 +55,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<{ connected: b
   return NextResponse.json({
     connected: true,
     status: healthData.status,
-    url: baseUrl,
+    url: RULES_ENGINE_CONFIG.BACKEND_URL,
   });
 }
 
@@ -84,21 +77,17 @@ export async function POST(req: NextRequest): Promise<NextResponse<MCPToolRespon
       return NextResponse.json(errorResponse, { status: 400 });
     }
 
-    // Get backend URL
-    const baseUrl = getBackendUrl();
-    const toolUrl = getToolUrl();
-    
-    console.log(`${RULES_ENGINE_CONFIG.MCP_LOG_PREFIX} Calling tool: ${toolName} at ${toolUrl}`);
+    console.log(`${RULES_ENGINE_CONFIG.MCP_LOG_PREFIX} Calling tool: ${toolName} at ${RULES_ENGINE_CONFIG.TOOL_URL}`);
     
     // First, check backend health
     const healthCheck = await checkBackendHealth();
     if (!healthCheck.healthy) {
       console.error(`${RULES_ENGINE_CONFIG.MCP_LOG_PREFIX} Health check failed:`, healthCheck.error);
       const errorResponse = createErrorResponse(
-        `Rules engine backend is not available at ${baseUrl}`,
+        `Rules engine backend is not available at ${RULES_ENGINE_CONFIG.BACKEND_URL}`,
         healthCheck.error,
         "Make sure the backend is running with: npm run build && node dist/http-server.js (from the ChatRPG root directory)",
-        getHealthCheckUrl()
+        RULES_ENGINE_CONFIG.HEALTH_CHECK_URL
       );
       return NextResponse.json(errorResponse, { status: 503 });
     }
@@ -107,7 +96,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<MCPToolRespon
 
     // Call the tool via direct HTTP endpoint
     try {
-      const toolResponse = await fetch(toolUrl, {
+      const toolResponse = await fetch(RULES_ENGINE_CONFIG.TOOL_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
