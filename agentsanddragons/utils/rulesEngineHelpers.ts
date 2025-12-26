@@ -136,11 +136,29 @@ export function normalizeToolArgs(args: unknown): NormalizedToolArgs {
 
 /**
  * Parse and normalize tool call arguments
+ * Also handles cases where values are JSON strings that should be parsed
  */
 export function parseToolCallArguments(
   argumentsString: string
 ): Record<string, NormalizedToolArgs> {
   const rawArgs = JSON.parse(argumentsString || '{}') as unknown;
-  return normalizeToolArgs(rawArgs) as Record<string, NormalizedToolArgs>;
+  const normalized = normalizeToolArgs(rawArgs) as Record<string, NormalizedToolArgs>;
+  
+  // Handle stringified JSON values (e.g., "participants": "[{...}]" should become "participants": [{...}])
+  for (const [key, value] of Object.entries(normalized)) {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(value);
+          normalized[key] = normalizeToolArgs(parsed) as NormalizedToolArgs;
+        } catch {
+          // Not valid JSON, keep as-is
+        }
+      }
+    }
+  }
+  
+  return normalized;
 }
 

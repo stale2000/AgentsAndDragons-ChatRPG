@@ -14,6 +14,10 @@ import {
   parseTogetherAIResponse,
 } from "@/utils/togetherAIClient";
 import { executeToolCalls } from "@/utils/toolExecutor";
+import { parseSSEStream } from "@/utils/streamParser";
+import { convertToVercelMessages } from "@/utils/messageConverter";
+import { accumulateToolCallDelta } from "@/utils/toolCallAccumulator";
+import { parseToolCallsFromContent, removeToolCallMarkers, filterTogetherAIMarkers } from "@/utils/toolCallParser";
 import type {
   TogetherAIMessage,
   TogetherAITool,
@@ -48,16 +52,12 @@ export async function GET() {
 const handleIntermediateSteps = async (
   togetherMessages: TogetherAIMessage[],
   togetherTools: TogetherAITool[],
-  mcpClientInstance: MCPClient
+  mcpClient: MCPClient
 ): Promise<NextResponse<RulesEngineIntermediateStepsResponse>> => {
-  const allMessages: Array<TogetherAIMessage | ToolCallMessage | ToolResultMessage> = [...togetherMessages];
+  const history: Array<TogetherAIMessage | ToolCallMessage | ToolResultMessage> = [...togetherMessages];
   let currentMessages: Array<TogetherAIMessage | ToolCallMessage | ToolResultMessage> = [...togetherMessages];
-  let iterationCount = 0;
 
-  while (iterationCount < RULES_ENGINE_CONFIG.MAX_ITERATIONS) {
-    iterationCount++;
-    
-    // Call Together AI (non-streaming)
+  for (let i = 0; i < RULES_ENGINE_CONFIG.MAX_ITERATIONS; i++) {
     const response = await callTogetherAI({
       messages: currentMessages,
       tools: togetherTools,
@@ -65,69 +65,26 @@ const handleIntermediateSteps = async (
     });
 
     const data = await parseTogetherAIResponse(response);
-    const assistantMessage = data.choices[0]?.message;
-    const toolCalls: TogetherAIToolCall[] = assistantMessage?.tool_calls || [];
-    const content = assistantMessage?.content || "";
+    const assistantMsg = data.choices[0]?.message;
+    const toolCalls: TogetherAIToolCall[] = assistantMsg?.tool_calls || [];
+    const content = assistantMsg?.content || "";
 
-    // Add assistant message to all messages
-    const assistantMsg: ToolCallMessage = {
+    const assistantMessage: ToolCallMessage = {
       role: "assistant",
-      content: content,
+      content,
       tool_calls: toolCalls,
     };
-    allMessages.push(assistantMsg);
+    history.push(assistantMessage);
 
-    // If no tool calls, we're done
-    if (toolCalls.length === 0) {
-      break;
-    }
+    if (toolCalls.length === 0) break;
 
-    // Execute tool calls
-    const toolResults = await executeToolCalls(toolCalls, mcpClientInstance);
-
-    // Add tool results to messages
-    allMessages.push(...toolResults);
-    currentMessages.push(
-      assistantMsg,
-      ...toolResults
-    );
+    const toolResults = await executeToolCalls(toolCalls, mcpClient);
+    history.push(...toolResults);
+    currentMessages.push(assistantMessage, ...toolResults);
   }
 
-  // Disconnect MCP client
-  await mcpClientInstance.disconnect();
-
-  // Convert to Vercel AI SDK format
-  const vercelMessages: VercelMessage[] = allMessages
-    .filter((msg): msg is TogetherAIMessage | ToolCallMessage | ToolResultMessage => 
-      msg.role === "user" || msg.role === "assistant" || msg.role === "tool"
-    )
-    .map((msg): VercelMessage => {
-      if (msg.role === "tool") {
-        return {
-          role: "tool",
-          content: msg.content,
-          tool_call_id: msg.tool_call_id,
-        };
-      }
-      if (msg.role === "assistant" && 'tool_calls' in msg && msg.tool_calls) {
-        return {
-          role: "assistant",
-          content: msg.content,
-          tool_calls: msg.tool_calls,
-        };
-      }
-      return {
-        role: msg.role as "user" | "assistant",
-        content: msg.content,
-      };
-    });
-
-  return NextResponse.json(
-    {
-      messages: vercelMessages,
-    },
-    { status: 200 }
-  );
+  await mcpClient.disconnect();
+  return NextResponse.json({ messages: convertToVercelMessages(history) });
 };
 
 /**
@@ -146,70 +103,50 @@ export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIn
     });
 
     const messages = body.messages ?? [];
-    
-    // Initialize MCP client
-    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} MCP Server URL: ${RULES_ENGINE_CONFIG.MCP_SERVER_URL}`);
-    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Base URL: ${RULES_ENGINE_CONFIG.BACKEND_URL}`);
-    
-    const mcpClientInstance = new MCPClient({ url: RULES_ENGINE_CONFIG.MCP_SERVER_URL });
-    
-    // Check backend health
-    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Checking backend health`);
+    const mcpClient = new MCPClient({ url: RULES_ENGINE_CONFIG.MCP_SERVER_URL });
+
     const healthCheck = await checkBackendHealth();
     if (!healthCheck.healthy) {
       console.error(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Health check failed:`, healthCheck.error);
       return NextResponse.json(createBackendUnavailableError(RULES_ENGINE_CONFIG.BACKEND_URL), { status: 503 });
     }
-    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Health check passed`);
-    
-    // Connect to MCP server
-    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Connecting to MCP server via SSE...`);
+
     try {
-      await mcpClientInstance.connect();
-      console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Successfully connected to MCP server`);
+      await mcpClient.connect();
     } catch (error) {
       console.error(`${RULES_ENGINE_CONFIG.LOG_PREFIX} MCP connection failed:`, error);
-      const errorResponse = createErrorResponse(
-        `Failed to connect to MCP server: ${error instanceof Error ? error.message : String(error)}`,
-        `Check that the backend server is running and accessible at ${RULES_ENGINE_CONFIG.MCP_SERVER_URL}`
+      return NextResponse.json(
+        createErrorResponse(
+          `Failed to connect to MCP server: ${error instanceof Error ? error.message : String(error)}`,
+          `Check that the backend server is running and accessible at ${RULES_ENGINE_CONFIG.MCP_SERVER_URL}`
+        ),
+        { status: 503 }
       );
-      return NextResponse.json(errorResponse, { status: 503 });
     }
 
-    // Get Together AI API key
     if (!RULES_ENGINE_CONFIG.TOGETHER_API_KEY) {
-      const errorResponse = createErrorResponse(
-        "TOGETHER_API_KEY environment variable is not set."
+      return NextResponse.json(
+        createErrorResponse("TOGETHER_API_KEY environment variable is not set."),
+        { status: 500 }
       );
-      return NextResponse.json(errorResponse, { status: 500 });
     }
 
-    // Convert messages to Together AI format
     const togetherMessages: TogetherAIMessage[] = [
-      {
-        role: "system",
-        content: DND_RULES_ENGINE_SYSTEM_PROMPT,
-      },
+      { role: "system", content: DND_RULES_ENGINE_SYSTEM_PROMPT },
       ...convertMessages(messages),
     ];
 
-    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Calling Together AI with MCP server: ${RULES_ENGINE_CONFIG.MCP_SERVER_URL}`);
-    console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Message count: ${togetherMessages.length}`);
-
-    // Fetch tools from MCP server using MCP SDK client
     let mcpTools;
     try {
-      mcpTools = await mcpClientInstance.listTools();
-      console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Fetched ${mcpTools.length} tools from MCP server`);
+      mcpTools = await mcpClient.listTools();
     } catch (error) {
-      await mcpClientInstance.disconnect();
-      const errorResponse = createErrorResponse(
-        `Failed to fetch tools: ${error instanceof Error ? error.message : String(error)}`
+      await mcpClient.disconnect();
+      return NextResponse.json(
+        createErrorResponse(`Failed to fetch tools: ${error instanceof Error ? error.message : String(error)}`),
+        { status: 500 }
       );
-      return NextResponse.json(errorResponse, { status: 500 });
     }
-    
-    // Convert MCP tools to Together AI function calling format
+
     const togetherTools: TogetherAITool[] = mcpTools.map((tool) => ({
       type: "function",
       function: {
@@ -219,16 +156,10 @@ export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIn
       },
     }));
 
-    // Handle intermediate steps vs streaming
     if (returnIntermediateSteps) {
-      return await handleIntermediateSteps(
-        togetherMessages,
-        togetherTools,
-        mcpClientInstance
-      );
+      return await handleIntermediateSteps(togetherMessages, togetherTools, mcpClient);
     }
 
-    // Call Together AI API with tools as function definitions (streaming)
     const response = await callTogetherAI({
       messages: togetherMessages,
       tools: togetherTools,
@@ -242,73 +173,42 @@ export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIn
         statusText: response.statusText,
         body: errorText,
       });
-      const errorResponse = createErrorResponse(
-        `Together AI API error: ${response.status} ${response.statusText}`
+      await mcpClient.disconnect();
+      return NextResponse.json(
+        createErrorResponse(`Together AI API error: ${response.status} ${response.statusText}`),
+        { status: response.status }
       );
-      return NextResponse.json(errorResponse, { status: response.status });
     }
 
-    // Helper function to execute tool calls via MCP server and stream follow-up response
     async function executeToolCallsAndStream(
       toolCalls: AccumulatedToolCall[],
-      mcpClientInstance: MCPClient,
       messages: Array<TogetherAIMessage | ToolCallMessage | ToolResultMessage>,
       controller: ReadableStreamDefaultController,
       encoder: TextEncoder
     ): Promise<void> {
-      console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Executing ${toolCalls.length} tool calls`);
-      
-      const toolResults = await executeToolCalls(toolCalls, mcpClientInstance);
-      
-      // Send tool results back to Together AI for final response
-      const followUpMessages: Array<TogetherAIMessage | ToolCallMessage | ToolResultMessage> = [
-        ...messages,
-        ...toolResults,
-      ];
-      
+      const toolResults = await executeToolCalls(toolCalls, mcpClient);
       const followUpResponse = await callTogetherAI({
-        messages: followUpMessages,
+        messages: [...messages, ...toolResults],
         stream: true,
       });
-      
-      if (followUpResponse.ok) {
-        const followUpReader = followUpResponse.body?.getReader();
-        if (followUpReader) {
-          const decoder = new TextDecoder();
-          let buffer = "";
-          
-          while (true) {
-            const { done, value } = await followUpReader.read();
-            if (done) break;
-            
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-            
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                const data = line.slice(6).trim();
-                if (data === "[DONE]") return;
-                
-                try {
-                  const parsed = JSON.parse(data) as TogetherAIResponse;
-                  const content = parsed.choices?.[0]?.delta?.content;
-                  if (content) {
-                    controller.enqueue(encoder.encode(content));
-                  }
-                } catch (e) {
-                  continue;
-                }
-              }
-            }
+
+      if (!followUpResponse.ok || !followUpResponse.body) return;
+
+      const reader = followUpResponse.body.getReader();
+      await parseSSEStream(reader, {
+        onContent: (content) => {
+          const cleanedContent = filterTogetherAIMarkers(content);
+          if (cleanedContent) {
+            controller.enqueue(encoder.encode(cleanedContent));
           }
-        }
-      }
+        },
+      });
     }
 
-    // Stream the response and handle tool calls
     const encoder = new TextEncoder();
-    let accumulatedToolCalls: AccumulatedToolCall[] = [];
+    const pendingToolCalls: AccumulatedToolCall[] = [];
+    let contentBuffer = "";
+    let hasToolCallDeltas = false;
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -318,94 +218,93 @@ export async function POST(req: NextRequest): Promise<NextResponse<RulesEngineIn
           return;
         }
 
-        const decoder = new TextDecoder();
-        let buffer = "";
-
         try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              // If we have pending tool calls, execute them
-              if (accumulatedToolCalls.length > 0) {
-                await executeToolCallsAndStream(accumulatedToolCalls, mcpClientInstance, togetherMessages, controller, encoder);
+          const result = await parseSSEStream(reader, {
+            onContent: (content) => {
+              // Always filter markers from content before processing
+              const cleanedContent = filterTogetherAIMarkers(content);
+              contentBuffer += content; // Keep original for parsing
+              
+              // Check for embedded tool calls in content buffer (with markers or plain JSON)
+              const parsedToolCalls = parseToolCallsFromContent(contentBuffer);
+              if (parsedToolCalls.length > 0) {
+                hasToolCallDeltas = true;
+                console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Found ${parsedToolCalls.length} tool calls in content`);
+                
+                // Convert parsed tool calls to AccumulatedToolCall format
+                for (let i = 0; i < parsedToolCalls.length; i++) {
+                  const parsed = parsedToolCalls[i];
+                  pendingToolCalls.push({
+                    id: `call_${Date.now()}_${i}`,
+                    type: "function",
+                    function: {
+                      name: parsed.name,
+                      arguments: JSON.stringify(parsed.parameters),
+                    },
+                  });
+                }
+                
+                // Don't stream content that contains tool calls
+                return;
               }
-              // Disconnect MCP client
-              await mcpClientInstance.disconnect();
-              break;
+              
+              // Only stream cleaned content if we haven't detected tool calls
+              if (!hasToolCallDeltas && cleanedContent) {
+                controller.enqueue(encoder.encode(cleanedContent));
+              }
+            },
+            onToolCallDelta: (delta) => {
+              hasToolCallDeltas = true;
+              accumulateToolCallDelta(pendingToolCalls, delta);
+              console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Tool call delta detected, pending: ${pendingToolCalls.length}`);
+            },
+          });
+
+          // Check content buffer for tool calls one more time (in case they weren't detected during streaming)
+          if (!hasToolCallDeltas) {
+            const parsedToolCalls = parseToolCallsFromContent(contentBuffer);
+            if (parsedToolCalls.length > 0) {
+              hasToolCallDeltas = true;
+              console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Found ${parsedToolCalls.length} tool calls in final buffer`);
+              
+              for (let i = 0; i < parsedToolCalls.length; i++) {
+                const parsed = parsedToolCalls[i];
+                pendingToolCalls.push({
+                  id: `call_${Date.now()}_${i}`,
+                  type: "function",
+                  function: {
+                    name: parsed.name,
+                    arguments: JSON.stringify(parsed.parameters),
+                  },
+                });
+              }
+              
+              contentBuffer = removeToolCallMarkers(contentBuffer);
             }
+          }
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
+          console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Stream finished`, {
+            finishReason: result.finishReason,
+            pendingToolCalls: pendingToolCalls.length,
+            hasToolCalls: result.hasToolCalls,
+            hasToolCallDeltas,
+          });
 
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                const data = line.slice(6).trim();
-                if (data === "[DONE]") {
-                  // If we have pending tool calls, execute them
-                  if (accumulatedToolCalls.length > 0) {
-                    await executeToolCallsAndStream(accumulatedToolCalls, mcpClientInstance, togetherMessages, controller, encoder);
-                  }
-                  // Disconnect MCP client
-                  await mcpClientInstance.disconnect();
-                  controller.close();
-                  return;
-                }
-
-                try {
-                  const parsed = JSON.parse(data) as TogetherAIResponse;
-                  const choice: TogetherAIResponseChoice | undefined = parsed.choices?.[0];
-                  const delta = choice?.delta;
-                  const finishReason = choice?.finish_reason;
-                  
-                  // Handle tool call deltas
-                  if (delta?.tool_calls) {
-                    for (const toolCallDelta of delta.tool_calls) {
-                      const index = toolCallDelta.index ?? 0;
-                      if (!accumulatedToolCalls[index]) {
-                        accumulatedToolCalls[index] = {
-                          id: toolCallDelta.id || `call_${Date.now()}_${index}`,
-                          type: "function",
-                          function: {
-                            name: "",
-                            arguments: "",
-                          },
-                        };
-                      }
-                      
-                      if (toolCallDelta.function?.name) {
-                        accumulatedToolCalls[index].function.name += toolCallDelta.function.name;
-                      }
-                      if (toolCallDelta.function?.arguments) {
-                        accumulatedToolCalls[index].function.arguments += toolCallDelta.function.arguments;
-                      }
-                    }
-                  }
-                  
-                  // Handle content
-                  const content = delta?.content;
-                  if (content) {
-                    controller.enqueue(encoder.encode(content));
-                  }
-
-                  // If finish reason is tool_calls, execute them
-                  if (finishReason === "tool_calls" && accumulatedToolCalls.length > 0) {
-                    await executeToolCallsAndStream(accumulatedToolCalls, mcpClientInstance, togetherMessages, controller, encoder);
-                    accumulatedToolCalls = [];
-                  }
-                } catch (e) {
-                  // Skip invalid JSON
-                  continue;
-                }
-              }
+          if ((result.finishReason === "tool_calls" || hasToolCallDeltas) && pendingToolCalls.length > 0) {
+            console.log(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Executing ${pendingToolCalls.length} tool calls`);
+            await executeToolCallsAndStream(pendingToolCalls, togetherMessages, controller, encoder);
+          } else if (contentBuffer && !hasToolCallDeltas) {
+            // Stream buffered content if no tool calls were detected
+            const cleanedContent = filterTogetherAIMarkers(contentBuffer);
+            if (cleanedContent.trim()) {
+              controller.enqueue(encoder.encode(cleanedContent));
             }
           }
         } catch (error) {
           console.error(`${RULES_ENGINE_CONFIG.LOG_PREFIX} Stream error:`, error);
           controller.error(error);
         } finally {
-          // Disconnect MCP client
-          await mcpClientInstance.disconnect();
+          await mcpClient.disconnect();
           controller.close();
         }
       },
